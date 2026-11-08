@@ -18,6 +18,8 @@ class ModelsTest {
         assertEquals("λ🦀", TerminalInput.modified("λ🦀", control = false, alt = false))
         assertEquals("\u001b[A", TerminalInput.key("up"))
         assertEquals("\r", TerminalInput.key("enter"))
+        assertEquals(TerminalInput.SHIFT_ENTER, TerminalInput.key("enter", shift=true))
+        assertEquals(TerminalInput.SHIFT_ENTER, TerminalInput.modified("\r", control=false, alt=false, shift=true))
     }
     @Test fun parsesHistoryViewportAndKeepsOldFramesCompatible() {
         val screen=TerminalScreen.parse(JSONObject("""{"columns":2,"rows":2,"foreground":0,"background":0,"cells":[],"scrollbar":[100,25,20]}"""))

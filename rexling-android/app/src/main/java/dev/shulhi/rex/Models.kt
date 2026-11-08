@@ -94,6 +94,10 @@ private fun argb(rgb: Int): Int = rgb or (0xff shl 24)
 private fun <T> JSONArray?.objects(map: (Any) -> T): List<T> = if (this == null) emptyList() else (0 until length()).map { map(get(it)) }
 
 object TerminalInput {
+    // Shift+Enter has no legacy encoding (it would be a plain \r). The engine
+    // turns this kitty sequence into a real Shift+Enter key event, which Rex
+    // then encodes for whatever keyboard mode the program enabled.
+    const val SHIFT_ENTER = "\u001b[13;2u"
     private val keys=mapOf(
         "esc" to "\u001b", "tab" to "\t", "enter" to "\r", "backspace" to "\u007f",
         "pageup" to "\u001b[5~", "pagedown" to "\u001b[6~",
@@ -118,6 +122,7 @@ object TerminalInput {
         val sequence=keys[name] ?: return ""
         val modifier=1+(if(shift) 1 else 0)+(if(alt) 2 else 0)+(if(control) 4 else 0)
         if(modifier==1) return sequence
+        if(name=="enter" && modifier==2) return SHIFT_ENTER
         if(name=="tab" && shift) return (if(alt) "\u001b" else "")+"\u001b[Z"
         if(sequence.startsWith("\u001b[") || sequence.startsWith("\u001bO")) {
             val body=sequence.substring(2)

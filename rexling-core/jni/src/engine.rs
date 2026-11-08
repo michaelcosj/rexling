@@ -85,9 +85,26 @@ impl Drop for Session {
 
 type InputReply = Pin<Box<dyn Future<Output = Result<Value>>>>;
 struct InputAck {target:Target,paste:bool,reply:InputReply}
+// Kotlin's marker for Shift+Enter (TerminalInput.SHIFT_ENTER).
+const SHIFT_ENTER:&str="\x1b[13;2u";
 fn input_event(paste:bool,text:&str)->Value {
     if paste {json!({"type":"paste","payload":{"text":text}})}
+    // A real key event, so Rex encodes it for the program's keyboard mode:
+    // ESC[13;2u with the kitty protocol, ESC[27;2;13~ otherwise.
+    else if text==SHIFT_ENTER {json!({"type":"key","payload":{"key":"enter","mods":"shift","consumed_mods":"","text":"","unshifted_codepoint":13,"composing":false,"action":"press"}})}
     else {json!({"type":"key","payload":{"key":"unidentified","mods":"","consumed_mods":"","text":text,"unshifted_codepoint":0,"composing":false,"action":"press"}})}
+}
+#[cfg(test)]
+mod shift_enter_tests {
+    use super::*;
+    #[test]
+    fn shift_enter_becomes_a_key_event() {
+        let event=input_event(false,SHIFT_ENTER);
+        assert_eq!(event["payload"]["key"],"enter");
+        assert_eq!(event["payload"]["mods"],"shift");
+        assert_eq!(input_event(false,"\r")["payload"]["key"],"unidentified");
+        assert_eq!(input_event(true,SHIFT_ENTER)["type"],"paste");
+    }
 }
 type PreviewTask = Pin<Box<dyn Future<Output = Result<Vec<(String, Value)>>>>>;
 fn new_split_arguments(session: &str,anchor: &str,command: &Value)->Result<Value> {
