@@ -1,0 +1,141 @@
+# Builds the release APK and publishes it as a GitHub release.
+#
+# Runs on pushes to main, by hand (Actions → APK → Run workflow), and daily:
+# the daily run merges shulhi/rexling's main first and builds only when it
+# brought something new.
+#
+# Signing uses a stable key from repository secrets, so each release installs
+# over the previous one:
+#   REXLING_KEYSTORE_BASE64   base64 of the .jks file
+#   REXLING_KEYSTORE_PASSWORD
+#   REXLING_KEY_ALIAS
+#   REXLING_KEY_PASSWORD
+name: APK
+
+on:
+  push:
+    branches: [main, "ci/**"]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANDROID_NDK_VERSION: 30.0.16248370
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream (scheduled runs)
+        id: sync
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch https://github.com/shulhi/rexling.git main
+          if git merge-base --is-ancestor FETCH_HEAD HEAD; then
+            echo "Nothing new upstream."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git merge --no-edit FETCH_HEAD
+          git push origin HEAD:main
+          echo "build=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        if: steps.sync.outputs.build == 'true'
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.sync.outputs.build == 'true'
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.sync.outputs.build == 'true'
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install Android SDK packages
+        if: steps.sync.outputs.build == 'true'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-37" "build-tools;36.0.0" "ndk;$ANDROID_NDK_VERSION"
+          # the runner presets ANDROID_NDK_HOME to its own NDK; the native build reads it
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v4
+        if: steps.sync.outputs.build == 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rexling-core/.build
+            rexling-core/target
+          key: native-${{ hashFiles('rexling-core/Cargo.lock', 'rexling-core/native/ghostty-source.json') }}
+          restore-keys: native-
+
+      - name: Decode signing key
+        if: steps.sync.outputs.build == 'true'
+        env:
+          KEYSTORE: ${{ secrets.REXLING_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::error::REXLING_KEYSTORE_BASE64 is not set; see the top of this workflow."
+            exit 1
+          fi
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/rexling.jks"
+          echo "REXLING_KEYSTORE_FILE=$RUNNER_TEMP/rexling.jks" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        if: steps.sync.outputs.build == 'true'
+        working-directory: rexling-android
+        env:
+          REXLING_KEYSTORE_PASSWORD: ${{ secrets.REXLING_KEYSTORE_PASSWORD }}
+          REXLING_KEY_ALIAS: ${{ secrets.REXLING_KEY_ALIAS }}
+          REXLING_KEY_PASSWORD: ${{ secrets.REXLING_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon :app:shareRelease
+
+      - name: Verify APK
+        if: steps.sync.outputs.build == 'true'
+        working-directory: rexling-android
+        run: python3 scripts/verify_apk.py --apk app/build/outputs/apk/release/app-release.apk --require-release
+
+      - name: Publish release
+        if: steps.sync.outputs.build == 'true' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk=$(ls rexling-android/dist/*.apk)
+          name=$(basename "$apk" .apk)
+          tag="${name#Rexling-}"
+          tag="${tag%-arm64-release}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "Release $tag already exists."
+            exit 0
+          fi
+          gh release create "$tag" "$apk" "$apk.sha256" \
+            --title "$name" --target "$(git rev-parse HEAD)" --latest \
+            --notes "Built from $(git rev-parse --short HEAD) by ${{ github.workflow }} run ${{ github.run_number }}."
+
+      - uses: actions/upload-artifact@v4
+        if: steps.sync.outputs.build == 'true'
+        with:
+          name: rexling-apk
+          path: rexling-android/dist/
+          retention-days: 14

@@ -42,17 +42,29 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     packaging { jniLibs { useLegacyPackaging = false } }
+    // CI signs with a stable key from the environment so each release installs
+    // over the last; without it, release builds keep the local debug key.
+    val releaseKeystore=providers.environmentVariable("REXLING_KEYSTORE_FILE").orNull
+    if (releaseKeystore != null) {
+        signingConfigs.create("ci") {
+            storeFile=file(releaseKeystore)
+            storePassword=providers.environmentVariable("REXLING_KEYSTORE_PASSWORD").get()
+            keyAlias=providers.environmentVariable("REXLING_KEY_ALIAS").get()
+            keyPassword=providers.environmentVariable("REXLING_KEY_PASSWORD").get()
+        }
+    }
+    val releaseSigning=signingConfigs.getByName(if (releaseKeystore != null) "ci" else "debug")
     buildTypes {
         release {
             // Preserve the installed prototype identity for local release upgrades.
-            signingConfig=signingConfigs.getByName("debug")
+            signingConfig=releaseSigning
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         create("optimized") {
             initWith(getByName("release"))
-            signingConfig=signingConfigs.getByName("debug")
+            signingConfig=releaseSigning
             matchingFallbacks += "release"
         }
         create("profile") {
