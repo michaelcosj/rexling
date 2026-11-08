@@ -132,6 +132,12 @@ class RexModel @JvmOverloads constructor(application: Application, preferenceNam
     internal var arrowJoystickEnabled by mutableStateOf(preferences.getBoolean("arrow_joystick_enabled",true))
         private set
     internal fun changeArrowJoystick(value: Boolean) {arrowJoystickEnabled=value;preferences.edit {putBoolean("arrow_joystick_enabled",value)}}
+    internal var terminalPadding by mutableStateOf(runCatching {TerminalPadding.valueOf(preferences.getString("terminal_padding","NORMAL")!!)}.getOrDefault(TerminalPadding.NORMAL))
+        private set
+    internal fun changeTerminalPadding(value: TerminalPadding) {terminalPadding=value;preferences.edit {putString("terminal_padding",value.name)}}
+    internal var extendPadding by mutableStateOf(preferences.getBoolean("terminal_padding_extend",true))
+        private set
+    internal fun changeExtendPadding(value: Boolean) {extendPadding=value;preferences.edit {putBoolean("terminal_padding_extend",value)}}
     internal var shortcutGesture by mutableStateOf(runCatching {ControlShortcutGesture.valueOf(preferences.getString("ctrl_shortcut_gesture","HOLD")!!)}.getOrDefault(ControlShortcutGesture.HOLD))
         private set
     internal fun changeShortcutGesture(value: ControlShortcutGesture) {shortcutGesture=value;preferences.edit {putString("ctrl_shortcut_gesture",value.name)}}

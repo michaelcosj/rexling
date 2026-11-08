@@ -125,6 +125,11 @@ class TerminalView(context: Context) : View(context) {
     private var insetBottom = 0f
     private val contentWidth: Float get() = (width - insetHorizontal * 2).coerceAtLeast(1f)
     private val contentHeight: Float get() = (height - insetTop - insetBottom).coerceAtLeast(1f)
+    // Cell backgrounds on the grid's edges fill the padding beside them, like
+    // Ghostty's window-padding-color=extend; off, the padding keeps the theme
+    // background.
+    var extendPadding: Boolean = true
+        set(value) {if(field==value) return;field=value;clearRows();invalidate()}
     fun setTerminalPaddingDp(horizontal: Int, top: Int, bottom: Int) {
         val density = resources.displayMetrics.density
         val h = (horizontal * density).roundToInt().toFloat()
@@ -173,7 +178,7 @@ class TerminalView(context: Context) : View(context) {
         android.os.Trace.beginSection("Rexlet.drawTerminal")
         val token=frameTraceToken.takeIf {selection==null}
         if(token!=null) android.os.Trace.beginSection("Rexlink.draw.$token")
-        val geometry="$width:$height:${frame.columns}:$visibleColumns:$visibleRows:$insetHorizontal:$insetTop:$insetBottom:${canvas.isHardwareAccelerated}"
+        val geometry="$width:$height:${frame.columns}:$visibleColumns:$visibleRows:$insetHorizontal:$insetTop:$insetBottom:$extendPadding:${canvas.isHardwareAccelerated}"
         if(geometry!=rowGeometry) {clearRows();recorded=arrayOfNulls(visibleRows);rowGeometry=geometry}
         android.os.Trace.beginSection("Rexlink.linkIndex")
         val rowLinks=try {linkIndex.update(frame)} finally {android.os.Trace.endSection()}
@@ -236,8 +241,9 @@ class TerminalView(context: Context) : View(context) {
         fun flush() {
             if(end<=start || start>=columns || color==palette.background) return
             backgroundPaint.color=color
-            canvas.drawRect(if(start==0) 0f else insetHorizontal+start*cellWidth,0f,
+            if(extendPadding) canvas.drawRect(if(start==0) 0f else insetHorizontal+start*cellWidth,0f,
                 if(end>=columns) width.toFloat() else insetHorizontal+end*cellWidth,bottom,backgroundPaint)
+            else canvas.drawRect(insetHorizontal+start*cellWidth,top,insetHorizontal+minOf(end,columns)*cellWidth,top+cellHeight,backgroundPaint)
         }
         for(cell in cells) {
             if(cell.width==0 && cell.x<end) continue
