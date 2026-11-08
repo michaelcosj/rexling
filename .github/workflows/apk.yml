@@ -73,9 +73,10 @@ jobs:
       - name: Install Android SDK packages
         if: steps.sync.outputs.build == 'true'
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-37" "build-tools;36.0.0" "ndk;$ANDROID_NDK_VERSION"
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          (yes || true) | "$sdk" --licenses > /dev/null
+          # compileSdk release(37) is "android-37.0" in the SDK repository
+          "$sdk" "platforms;android-37.0" "build-tools;36.0.0" "ndk;$ANDROID_NDK_VERSION"
           # the runner presets ANDROID_NDK_HOME to its own NDK; the native build reads it
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
 
