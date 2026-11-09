@@ -19,9 +19,6 @@ terminal state.
 - **Terminal padding** options.
 - **CI builds.** Signed release APKs built on GitHub Actions.
 
-Changes that might be useful to everyone are offered upstream as pull requests.
-See [Branches](#branches).
-
 ## Install
 
 Requirements: a 64-bit ARM phone running Android 9 or newer, plus a Rex server you can
@@ -44,15 +41,6 @@ and Python 3.9 or newer. The full setup is in [BUILDING.md](BUILDING.md).
 ```sh
 ./rexling-android/scripts/gradle.sh :app:assembleRelease
 ```
-
-## Branches
-
-| Branch | Purpose |
-|---|---|
-| `main` | This fork: upstream plus personal changes. Default branch; CI builds it. |
-| `upstream-tracking` | An exact mirror of `shulhi/rexling` `main`. Never committed to. |
-| `feat/*`, `fix/*` | Changes meant for upstream, branched from `upstream-tracking`. |
-| `personal/*` | Fork-only changes, built on top of the matching `feat/*` branch. |
 
 ## License
 
