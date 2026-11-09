@@ -20,7 +20,8 @@ internal class WorkspacePresentation {
         var identityChanged=false
         val panes=ids.associateWith {id->
             val old=previous[id]
-            val live=state.programs[id]?.takeIf {it.known}
+            // The cache keeps presentation only; raw process names never reach saved preferences.
+            val live=state.programs[id]?.takeIf {it.known}?.copy(candidates=emptyList())
             val changed=live!=null && live!=old?.program
             if(changed) identityChanged=true
             Pane(live ?: old?.program,

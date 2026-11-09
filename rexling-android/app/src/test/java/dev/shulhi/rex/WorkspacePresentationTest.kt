@@ -4,7 +4,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WorkspacePresentationTest {
-    private val codex=ProgramIdentity.resolve(listOf("codex"))
+    // The cache stores presentation only, so cached identities carry no process candidates.
+    private val codex=ProgramIdentity.resolve(listOf("codex")).copy(candidates=emptyList())
     private fun snapshot(session: String="s",program: ProgramIdentity?=null,title: String?=null)=AppState(
         phase="connected",selectedSession=session,selectedBlock="p",
         windows=listOf(WindowItem("w","window-123abc",listOf(BlockItem("p","shell")))),
@@ -64,6 +65,13 @@ class WorkspacePresentationTest {
         assertFalse(cache.observe(live.copy(titles=mapOf("p" to "Task ·"))))
         assertTrue(cache.dirty)
         assertEquals("Task ·",WorkspacePresentation.decode(cache.encode()).present(snapshot()).titles["p"])
+    }
+    @Test fun processCandidatesAreNotCachedAndDoNotDirtyTheCache() {
+        val cache=WorkspacePresentation()
+        assertTrue(cache.observe(snapshot(program=ProgramIdentity.resolve(listOf("/opt/bin/codex","codex")))));cache.markSaved()
+        assertFalse(cache.observe(snapshot(program=ProgramIdentity.resolve(listOf("codex")))));assertFalse(cache.dirty)
+        val restored=WorkspacePresentation.decode(cache.encode())
+        assertEquals(emptyList<String>(),restored.present(snapshot()).programs["p"]?.candidates)
     }
     @Test fun disconnectedCreatingAndPreviewStatesDoNotOverwriteCache() {
         val cache=WorkspacePresentation()
