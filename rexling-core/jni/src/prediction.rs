@@ -45,8 +45,11 @@ impl Mode {
 enum Kind {
     /// A typed character; confirmed once the server cursor has moved past it.
     Char,
-    /// A backspace at the end of a line; confirmed once the cell is blank and the cursor is back.
+    /// A backspace at the end of a line, drawn as a blank; confirmed once the cursor is back.
     Erase,
+    /// A backspace before other text, such as a fish autosuggestion: only the cursor moves.
+    /// The shell redraws the rest, so nothing is drawn; confirmed once the cursor is back.
+    Move,
     /// Moves a TUI's reverse-video cursor; never confirmed or failed on its own.
     FakeCursor,
 }
@@ -62,6 +65,9 @@ struct Prediction {
     owner: u64,
     id: u64,
     at: Instant,
+    /// The server's cursor when this was predicted. Once the server cursor has moved from here
+    /// past the prediction, the server has handled the key and a mismatch is a wrong guess.
+    origin: (u16, u16),
 }
 
 pub(crate) struct Predictor {
@@ -75,6 +81,9 @@ pub(crate) struct Predictor {
     predictions: Vec<Prediction>,
     /// Where the next character goes; None means start from the server's cursor.
     cursor: Option<(u16, u16)>,
+    /// Where typing started on the current line. Backspace is only guessed over text typed here,
+    /// never over the prompt.
+    floor: Option<(u16, u16)>,
     base: Option<Arc<Frame>>,
     target: String,
 }
@@ -100,6 +109,7 @@ impl Predictor {
             next_id: 0,
             predictions: Vec::new(),
             cursor: None,
+            floor: None,
             base: None,
             target: String::new(),
         }
@@ -117,12 +127,14 @@ impl Predictor {
     pub fn reset(&mut self) {
         self.predictions.clear();
         self.cursor = None;
+        self.floor = None;
         self.epoch += 1;
     }
 
     fn tentative(&mut self) {
         self.epoch += 1;
         self.cursor = None;
+        self.floor = None;
     }
 
     fn timeout(&self) -> Duration {
@@ -175,7 +187,8 @@ impl Predictor {
         })
     }
 
-    fn push(&mut self, x: u16, y: u16, cell: Cell, kind: Kind, owner: u64, now: Instant) -> u64 {
+    #[allow(clippy::too_many_arguments)]
+    fn push(&mut self, x: u16, y: u16, cell: Cell, kind: Kind, owner: u64, origin: (u16, u16), now: Instant) -> u64 {
         if kind != Kind::FakeCursor {
             // A newer keystroke at the same cell supersedes the older guess.
             self.predictions
@@ -192,6 +205,7 @@ impl Predictor {
             owner: if kind == Kind::FakeCursor { owner } else { id },
             id,
             at: now,
+            origin,
         });
         id
     }
@@ -219,6 +233,7 @@ impl Predictor {
             return;
         }
         let hidden_cursor = frame.cursor.is_none();
+        let Some(origin) = frame.cursor_at else { return };
         for c in text.chars() {
             let Some((x, y)) = self.cursor.or(frame.cursor_at) else { return };
             match c {
@@ -244,31 +259,50 @@ impl Predictor {
                     cell.width = 1;
                     cell.hyperlink = None;
                     cell.attributes &= !(INVERSE | PREDICTED);
-                    let id = self.push(x, y, cell, Kind::Char, 0, now);
+                    let id = self.push(x, y, cell, Kind::Char, 0, origin, now);
+                    self.floor = match self.floor {
+                        Some((fx, fy)) if fy == y => Some((fx.min(x), y)),
+                        _ => Some((x, y)),
+                    };
                     // A TUI that hides the terminal cursor draws its own in reverse video; move it too.
                     if hidden_cursor && under.is_some_and(|u| u.attributes & INVERSE != 0)
                         && let Some(mut next) = self.shown(&frame, x + 1, y)
                     {
                         next.attributes |= INVERSE;
-                        self.push(x + 1, y, next, Kind::FakeCursor, id, now);
+                        self.push(x + 1, y, next, Kind::FakeCursor, id, origin, now);
                     }
                     self.cursor = Some((x + 1, y));
                 }
                 '\x7f' | '\x08' => {
-                    // Only a backspace at the end of a line in a plain prompt is predictable.
-                    if x == 0 || hidden_cursor || !self.rest_of_row_blank(&frame, x, y) {
-                        self.tentative();
-                        continue;
-                    }
-                    let Some(mut cell) = self.shown(&frame, x - 1, y) else {
+                    // Only over text typed on this line; at the prompt, backspace does nothing.
+                    let typed = self.floor.is_some_and(|(fx, fy)| fy == y && x > fx);
+                    let Some(left) = x.checked_sub(1).and_then(|left| self.shown(&frame, left, y)).filter(|_| typed) else {
                         self.tentative();
                         continue;
                     };
+                    let mut cell = left;
                     cell.text = " ".into();
                     cell.width = 1;
                     cell.hyperlink = None;
                     cell.attributes &= !(INVERSE | PREDICTED);
-                    self.push(x - 1, y, cell, Kind::Erase, 0, now);
+                    if hidden_cursor {
+                        // pi: at the end of its input, the reverse-video cursor steps back over a blank.
+                        let at_end = self.shown(&frame, x, y).is_some_and(|u| u.attributes & INVERSE != 0 && blank(&u.text))
+                            && self.rest_of_row_blank(&frame, x + 1, y);
+                        let Some(mut old) = self.shown(&frame, x, y).filter(|_| at_end) else {
+                            self.tentative();
+                            continue;
+                        };
+                        cell.attributes |= INVERSE;
+                        let id = self.push(x - 1, y, cell, Kind::Erase, 0, origin, now);
+                        old.attributes &= !INVERSE;
+                        self.push(x, y, old, Kind::FakeCursor, id, origin, now);
+                    } else if self.rest_of_row_blank(&frame, x, y) {
+                        self.push(x - 1, y, cell, Kind::Erase, 0, origin, now);
+                    } else {
+                        // Text to the right (often a fish suggestion) is redrawn by the shell.
+                        self.push(x - 1, y, cell, Kind::Move, 0, origin, now);
+                    }
                     self.cursor = Some((x - 1, y));
                 }
                 _ => self.tentative(),
@@ -315,14 +349,18 @@ impl Predictor {
         for p in self.predictions.iter().filter(|p| p.kind != Kind::FakeCursor) {
             let real = cell_at(&frame, p.x, p.y).map_or("", |c| c.text.as_str());
             let real = if real.is_empty() { " " } else { real };
+            let past = cy > p.y || (cy == p.y && cx > p.x);
             let ok = match p.kind {
-                Kind::Char => real == p.cell.text && (cy > p.y || (cy == p.y && cx > p.x)),
-                Kind::Erase => blank(real) && cy == p.y && cx <= p.x,
+                Kind::Char => real == p.cell.text && past,
+                Kind::Erase | Kind::Move => cy == p.y && cx <= p.x,
                 Kind::FakeCursor => false,
             };
+            // The server has moved its cursor beyond this keystroke yet shows something else there,
+            // for example a fish abbreviation expanding on space: drop the guess now, not at the timeout.
+            let overtaken = p.kind == Kind::Char && past && (cx, cy) != p.origin;
             if ok {
                 confirmed.push((p.id, p.epoch, p.kind, now.saturating_duration_since(p.at)));
-            } else if now.saturating_duration_since(p.at) > timeout {
+            } else if overtaken || now.saturating_duration_since(p.at) > timeout {
                 failed = true;
                 break;
             }
@@ -378,7 +416,7 @@ impl Predictor {
             return frame;
         }
         let mut cells = frame.cells.clone();
-        for p in &shown {
+        for p in shown.iter().filter(|p| p.kind != Kind::Move) {
             let mut cell = p.cell.clone();
             if self.flagging && p.kind != Kind::FakeCursor {
                 cell.attributes |= PREDICTED;
@@ -586,13 +624,67 @@ mod tests {
     }
 
     #[test]
-    fn backspace_before_an_autosuggestion_is_not_guessed() {
+    fn backspace_before_a_suggestion_moves_only_the_cursor_and_typing_stays_instant() {
         let now = Instant::now();
         let (mut p, _) = warmed(now);
-        let suggestion = frame(&["$ e cho hi"], (3, 0), true, 0);
-        p.observe(suggestion.clone(), now);
+        p.input("t", "c", true, now);
+        // fish echoes c and shows a suggestion after it.
+        let suggestion = frame(&["$ echo hi"], (4, 0), true, 0);
+        p.observe(suggestion.clone(), now + Duration::from_millis(200));
+        assert!(!p.pending());
         p.input("t", "\x7f", true, now);
-        assert_eq!(row(&p.display(suggestion), 0), "$ e cho hi");
+        let shown = p.display(suggestion.clone());
+        assert_eq!(row(&shown, 0), "$ echo hi", "the shell redraws the suggestion itself");
+        assert_eq!(shown.cursor, Some((3, 0)));
+        p.input("t", "x", true, now);
+        let shown = p.display(suggestion);
+        assert_eq!(row(&shown, 0), "$ exho hi", "typing after a correction is not held back");
+        assert_eq!(shown.cursor, Some((4, 0)));
+        p.observe(frame(&["$ ex"], (4, 0), true, 0), now + Duration::from_millis(400));
+        assert!(!p.pending());
+    }
+
+    #[test]
+    fn backspace_is_never_guessed_over_the_prompt() {
+        let now = Instant::now();
+        let (mut p, f) = warmed(now);
+        p.input("t", "\x7f", true, now);
+        assert_eq!(row(&p.display(f.clone()), 0), "$");
+        let before = p.predictions.len();
+        p.input("t", "\x7f", true, now);
+        assert_eq!(p.predictions.len(), before, "the second backspace would reach the prompt");
+        assert_eq!(row(&p.display(f), 0), "$");
+    }
+
+    #[test]
+    fn a_guess_the_server_has_moved_past_is_dropped_at_once() {
+        let now = Instant::now();
+        let (mut p, _) = warmed(now);
+        p.input("t", "gs ", true, now);
+        // A fish abbreviation expands on space; the server cursor ends up far to the right.
+        let expanded = frame(&["$ egit status"], (14, 0), true, 0);
+        p.observe(expanded.clone(), now + Duration::from_millis(300));
+        assert!(!p.pending(), "no waiting for the timeout");
+        assert_eq!(row(&p.display(expanded), 0), "$ egit status");
+    }
+
+    #[test]
+    fn pi_backspace_steps_its_reverse_video_cursor_back() {
+        let now = Instant::now();
+        let mut p = Predictor::new();
+        p.set_mode(Mode::Always);
+        p.observe(frame(&["> ^"], (2, 0), false, 0), now);
+        p.input("t", "hi", true, now);
+        let typed = frame(&["> hi^"], (4, 0), false, 0);
+        p.observe(typed.clone(), now + Duration::from_millis(200));
+        assert!(!p.pending());
+        p.input("t", "\x7f", true, now);
+        let shown = p.display(typed);
+        assert_eq!(row(&shown, 0), "> h");
+        assert_ne!(cell_at(&shown, 3, 0).unwrap().attributes & INVERSE, 0);
+        assert_eq!(cell_at(&shown, 4, 0).unwrap().attributes & INVERSE, 0);
+        p.observe(frame(&["> h^"], (3, 0), false, 0), now + Duration::from_millis(400));
+        assert!(!p.pending());
     }
 
     #[test]
