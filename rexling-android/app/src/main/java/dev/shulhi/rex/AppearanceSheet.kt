@@ -29,27 +29,31 @@ import kotlin.math.roundToInt
     onAppearance: (Appearance)->Unit,onTheme: (String)->Unit,onClose: ()->Unit) {
     var editing by remember {mutableStateOf<Boolean?>(null)}
     BackHandler(editing!=null) {editing=null}
-    ModalBottomSheet(onDismissRequest=onClose,containerColor=MaterialTheme.colorScheme.surface) {
+    RexSheet(onDismissRequest=onClose) {
         Column(Modifier.fillMaxWidth().heightIn(max=650.dp).padding(bottom=24.dp)) {
-            Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start=if(editing!=null) 8.dp else 20.dp,end=20.dp),verticalAlignment=Alignment.CenterVertically) {
                 if(editing!=null) ChromeButton(ChromeIcon.LEFT,"Back to appearance") {editing=null}
-                Text(if(editing==null) "Appearance" else if(editing==true) "Dark theme" else "Light theme",Modifier.weight(1f),fontSize=20.sp,fontWeight=FontWeight.Bold)
-                ChromeButton(ChromeIcon.CLOSE,"Close appearance",onClick=onClose)
+                Box(Modifier.weight(1f)) {
+                    SettingsHeader(if(editing==null) "Appearance" else if(editing==true) "Dark theme" else "Light theme","Close appearance",onClose)
+                }
             }
             if(editing==null) {
-                Row(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    Appearance.entries.forEach {mode->FilterChip(selected=appearance==mode,onClick={onAppearance(mode)},
-                        label={Text(when(mode){Appearance.SYSTEM->"System";Appearance.DARK->"Dark";Appearance.LIGHT->"Light"})})}
-                }
-                for((label,preset) in listOf("Light theme" to light,"Dark theme" to dark)) {
-                    Row(Modifier.fillMaxWidth().clickable {editing=preset.terminal.dark}.padding(horizontal=20.dp,vertical=12.dp),
-                        verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                        ThemeSwatch(preset)
-                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
-                            Text(label,fontSize=14.sp,fontWeight=FontWeight.SemiBold)
-                            Text(preset.name,fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(Modifier.padding(horizontal=20.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+                    SettingsSection("Mode") {
+                        SettingsChoiceRow("Follow",Appearance.entries,appearance,{when(it){Appearance.SYSTEM->"System";Appearance.DARK->"Dark";Appearance.LIGHT->"Light"}},onAppearance)
+                    }
+                    SettingsSection("Themes") {
+                        for((label,preset) in listOf("Light theme" to light,"Dark theme" to dark)) {
+                            Row(Modifier.fillMaxWidth().clickable {editing=preset.terminal.dark}.padding(vertical=10.dp),
+                                verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                                ThemeSwatch(preset)
+                                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
+                                    Text(label,style=SettingsType.row)
+                                    Text(preset.name,style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                ChromeSymbol(ChromeIcon.RIGHT,Modifier.size(16.dp),MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
-                        ChromeSymbol(ChromeIcon.RIGHT,Modifier.size(16.dp),MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else {
@@ -58,13 +62,13 @@ import kotlin.math.roundToInt
                 LazyColumn(Modifier.fillMaxWidth().weight(1f,fill=false),contentPadding=PaddingValues(horizontal=12.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
                     items(options,key={it.id}) {theme->
                         val active=theme.id==selected.id
-                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
-                            .then(if(active) Modifier.border(1.dp,MaterialTheme.colorScheme.primary,RoundedCornerShape(16.dp)) else Modifier)
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                            .border(1.dp,if(active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha=.6f),RoundedCornerShape(10.dp))
                             .semantics(mergeDescendants=true) {contentDescription="Theme ${theme.name}";this.selected=active;role=Role.RadioButton}
                             .clickable {onTheme(theme.id);editing=null}.padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                             ThemeSwatch(theme)
-                            Text(theme.name,Modifier.weight(1f),fontSize=13.sp,fontWeight=if(active) FontWeight.SemiBold else FontWeight.Normal)
-                            if(active) Text("✓",color=MaterialTheme.colorScheme.primary,fontSize=18.sp)
+                            Text(theme.name,Modifier.weight(1f),style=SettingsType.row.copy(fontWeight=if(active) FontWeight.Bold else FontWeight.Normal))
+                            if(active) Text("✓",color=MaterialTheme.colorScheme.primary,style=SettingsType.title)
                         }
                     }
                 }
@@ -83,15 +87,15 @@ import kotlin.math.roundToInt
 }
 
 @Composable internal fun FontSizeDialog(size: Int,onSize: (Int)->Unit,onClose: ()->Unit) {
-    AlertDialog(onDismissRequest=onClose,title={Text("Font size",style=SettingsType.title)},text={
+    RexDialog(onClose,"Font size",confirmButton={RexButton("Done",onClose,primary=true)},text={
         Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
-                IconButton(onClick={onSize(size-1)},enabled=size>8,modifier=Modifier.semantics {contentDescription="Decrease font size"}) {Text("−",fontSize=24.sp)}
-                Text("$size sp",fontFamily=MonoUi,fontSize=16.sp)
-                IconButton(onClick={onSize(size+1)},enabled=size<20,modifier=Modifier.semantics {contentDescription="Increase font size"}) {Text("+",fontSize=24.sp)}
+                IconButton(onClick={onSize(size-1)},enabled=size>8,modifier=Modifier.semantics {contentDescription="Decrease font size"}) {Text("−",style=SettingsType.title.copy(fontSize=22.sp))}
+                Text("$size sp",style=SettingsType.title)
+                IconButton(onClick={onSize(size+1)},enabled=size<20,modifier=Modifier.semantics {contentDescription="Increase font size"}) {Text("+",style=SettingsType.title.copy(fontSize=22.sp))}
             }
             Slider(value=size.toFloat(),onValueChange={onSize(it.roundToInt())},valueRange=8f..20f,steps=11,modifier=Modifier.semantics {contentDescription="Font size"})
             Text("Aa 0123 / ~",fontFamily=MonoUi,fontSize=size.sp)
         }
-    },confirmButton={TextButton(onClick=onClose){Text("Done")}})
+    })
 }

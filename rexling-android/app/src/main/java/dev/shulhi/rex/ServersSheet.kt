@@ -24,34 +24,30 @@ import androidx.compose.ui.unit.sp
 @Composable internal fun ServersSheet(model: RexModel,onDismiss: ()->Unit) {
     var editing by remember {mutableStateOf<ServerProfile?>(null)}
     var editor by remember {mutableStateOf(false)}
-    ModalBottomSheet(onDismissRequest=onDismiss,containerColor=MaterialTheme.colorScheme.surface) {
+    RexSheet(onDismissRequest=onDismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max=600.dp).verticalScroll(rememberScrollState()).padding(horizontal=18.dp).padding(bottom=25.dp)) {
-            Row(Modifier.fillMaxWidth().padding(bottom=14.dp),verticalAlignment=Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Servers",fontSize=20.sp,fontWeight=FontWeight.Bold)
-                    Text("${model.connectedCount} connected",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Button(onClick={editing=null;editor=true}) {Text("+ Add server")}
+            SettingsHeader("Servers","Close servers",onDismiss,subtitle="${model.connectedCount} connected")
+            Row(Modifier.fillMaxWidth().padding(bottom=12.dp),horizontalArrangement=Arrangement.End) {
+                RexButton("+ Add server",{editing=null;editor=true},primary=true)
             }
             if(model.servers.isEmpty()) Text("Add a Rex server to get started.",Modifier.padding(vertical=16.dp))
             for(server in model.servers) {
                 val selected=server.id==model.activeServerId
                 val status=model.serverStatuses[server.id] ?: ServerStatus()
                 var menu by remember(server.id) {mutableStateOf(false)}
-                Row(Modifier.fillMaxWidth().padding(bottom=8.dp).clip(RoundedCornerShape(16.dp))
-                    .background(if(selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-                    .border(1.dp,if(selected) MaterialTheme.colorScheme.primary.copy(alpha=.25f) else Color.Transparent,RoundedCornerShape(16.dp))
+                Row(Modifier.fillMaxWidth().padding(bottom=8.dp).clip(RoundedCornerShape(10.dp))
+                    .border(1.dp,if(selected) MaterialTheme.colorScheme.primary.copy(alpha=.6f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f),RoundedCornerShape(10.dp))
                     .clickable {onDismiss();model.connectServer(server.id)}.padding(start=13.dp,top=12.dp,bottom=12.dp),verticalAlignment=Alignment.CenterVertically) {
                     Box(Modifier.size(7.dp).background(if(status.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,RoundedCornerShape(4.dp)))
                     Spacer(Modifier.width(11.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(server.label,fontWeight=FontWeight.SemiBold,fontSize=14.sp,maxLines=1,overflow=TextOverflow.Ellipsis)
+                        Text(server.label,style=SettingsType.row,maxLines=1,overflow=TextOverflow.Ellipsis)
                         Text(server.endpoint,fontFamily=MonoUi,fontSize=10.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
                         Text(when(status.phase) {
                             "connected"->if(selected) "Connected · viewing" else "Connected"
                             "connecting"->"Connecting…";"reconnecting"->"Reconnecting…";"paused"->"Paused"
                             "error"->"Connection failed";else->"Disconnected"
-                        },fontSize=11.sp,color=if(status.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        },style=SettingsType.detail,color=if(status.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         if(status.error.isNotBlank()) Text(status.error,fontSize=10.sp,maxLines=2,overflow=TextOverflow.Ellipsis,color=MaterialTheme.colorScheme.error)
                     }
                     Box {
@@ -64,7 +60,7 @@ import androidx.compose.ui.unit.sp
                     }
                 }
             }
-            Text("Switch servers without closing their connections.",Modifier.padding(top=9.dp),fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Switch servers without closing their connections.",Modifier.padding(top=9.dp),style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
     if(editor) ServerEditor(editing,onClose={editor=false},onSave={label,endpoint->model.saveServer(editing?.id,label,endpoint)})
@@ -74,7 +70,7 @@ import androidx.compose.ui.unit.sp
     var name by remember(server?.id) {mutableStateOf(server?.label.orEmpty())}
     var endpoint by remember(server?.id) {mutableStateOf(server?.endpoint.orEmpty())}
     var error by remember {mutableStateOf<String?>(null)}
-    AlertDialog(onDismissRequest=onClose,title={Text(if(server==null) "Add server" else "Edit server")},text={
+    RexAlertDialog(onDismissRequest=onClose,title={Text(if(server==null) "Add server" else "Edit server")},text={
         Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(name,{name=it;error=null},Modifier.fillMaxWidth(),label={Text("Name")},singleLine=true)
             OutlinedTextField(endpoint,{endpoint=it;error=null},Modifier.fillMaxWidth(),label={Text("Server URL")},singleLine=true,
@@ -82,6 +78,6 @@ import androidx.compose.ui.unit.sp
             Text("Use the server's authenticated Tailscale address.",fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
             error?.let {Text(it,color=MaterialTheme.colorScheme.error,fontSize=12.sp)}
         }
-    },confirmButton={Button(onClick={error=onSave(name,endpoint);if(error==null) onClose()},enabled=endpoint.isNotBlank()) {Text("Save & connect")}},
-        dismissButton={TextButton(onClick=onClose) {Text("Cancel")}})
+    },confirmButton={RexButton("Save & connect",{error=onSave(name,endpoint);if(error==null) onClose()},primary=true,enabled=endpoint.isNotBlank())},
+        dismissButton={RexButton("Cancel",onClose)})
 }

@@ -1,6 +1,7 @@
 package dev.shulhi.rex
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -12,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
     layout: NeovimShortcutLayout=NeovimShortcutLayout.CIRCULAR,onLayout: (NeovimShortcutLayout)->Unit={},
     effect: NeovimShortcutEffect=NeovimShortcutEffect.FAN_OUT,onEffect: (NeovimShortcutEffect)->Unit={},
     hapticsEnabled: Boolean=true,onHaptics: (Boolean)->Unit={}) {
-    ModalBottomSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=MaterialTheme.colorScheme.surface) {
+    RexSheet(onDismissRequest=onClose) {
         Column(Modifier.fillMaxWidth().heightIn(max=680.dp).verticalScroll(rememberScrollState()).padding(horizontal=20.dp).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
             SettingsHeader("Shortcuts","Close shortcuts",onClose,subtitle="The floating menu shows the profile that matches the program in the pane.")
             SettingsSection("Profiles") {
@@ -54,15 +54,16 @@ import androidx.compose.ui.unit.dp
 }
 
 @Composable private fun ShortcutProfileRow(profile: ShortcutProfile,onClick: ()->Unit,onEnabled: (Boolean)->Unit) {
-    Row(Modifier.fillMaxWidth().clickable(role=Role.Button,onClick=onClick).padding(start=16.dp,end=8.dp,top=12.dp,bottom=12.dp)
+    Row(Modifier.fillMaxWidth().clickable(role=Role.Button,onClick=onClick).padding(end=4.dp,top=11.dp,bottom=11.dp)
         .semantics {contentDescription="Edit ${profile.name} profile"},verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
             Text(profile.name,style=SettingsType.row)
             Text(profile.matchText,style=SettingsType.detail.copy(fontFamily=MonoUi),color=MaterialTheme.colorScheme.primary,maxLines=1,overflow=TextOverflow.Ellipsis)
             Text(shortcutCount(profile.items),style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked=profile.enabled,onCheckedChange=onEnabled,modifier=Modifier.semantics {
-            contentDescription="Show ${profile.name} shortcuts";stateDescription=if(profile.enabled) "On" else "Off"})
+        // Its own 48 dp target, separate from the row that opens the editor.
+        Box(Modifier.sizeIn(minWidth=48.dp,minHeight=48.dp).toggleable(profile.enabled,role=Role.Switch,onValueChange=onEnabled)
+            .semantics {contentDescription="Show ${profile.name} shortcuts"},contentAlignment=Alignment.Center) {RexToggle(profile.enabled)}
     }
 }
 
@@ -84,7 +85,7 @@ internal fun shortcutCount(items: List<NeovimShortcut>): String {
     var error by remember {mutableStateOf<String?>(null)}
     var deleting by remember {mutableStateOf(false)}
     val title=profile?.name ?: "New profile"
-    ModalBottomSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=MaterialTheme.colorScheme.surface) {
+    RexSheet(onDismissRequest=onClose) {
         Column(Modifier.fillMaxWidth().heightIn(max=680.dp).verticalScroll(rememberScrollState()).padding(horizontal=20.dp).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
             SettingsHeader(title,"Close $title",onClose)
             SettingsTextField("Name",name,{name=it;error=null})
@@ -101,10 +102,10 @@ internal fun shortcutCount(items: List<NeovimShortcut>): String {
                 "Start a line with ! to ask before sending it. Key notation: <CR>, <Esc>, <Tab>, <Space>, <C-x>, <M-x>, arrows and F1–F12.",
                 style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
-                if(onDelete!=null) TextButton(onClick={deleting=true}) {Text("Delete",color=MaterialTheme.colorScheme.error)}
-                if(defaults!=null) TextButton(onClick={draft=NeovimShortcuts.editorText(defaults);error=null}) {Text("Reset shortcuts")}
+                if(onDelete!=null) RexButton("Delete",{deleting=true},destructive=true)
+                if(defaults!=null) RexButton("Reset shortcuts",{draft=NeovimShortcuts.editorText(defaults);error=null})
                 Spacer(Modifier.weight(1f))
-                Button(onClick={error=onSave(name,match,prefix,enter,draft);if(error==null) onClose()}) {Text("Save")}
+                RexButton("Save",{error=onSave(name,match,prefix,enter,draft);if(error==null) onClose()},primary=true)
             }
         }
     }

@@ -30,13 +30,13 @@ internal fun sessionNameError(raw: String): String? {
     val canSave=enabled && error==null && value.text.trim()!=target.session.label
     val focus=remember {FocusRequester()}
     LaunchedEffect(target.key) {focus.requestFocus()}
-    AlertDialog(onDismissRequest=onDismiss,title={Text("Rename session")},text={
+    RexAlertDialog(onDismissRequest=onDismiss,title={Text("Rename session")},text={
         Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
             Text(target.server.label,fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(value,{value=it},Modifier.fillMaxWidth().focusRequester(focus),label={Text("Session name")},singleLine=true,
                 enabled=enabled,isError=error!=null,supportingText={if(error!=null) Text(error)},
                 keyboardOptions=KeyboardOptions(imeAction=ImeAction.Done),keyboardActions=KeyboardActions(onDone={if(canSave) onSave(value.text.trim())}))
         }
-    },confirmButton={Button(enabled=canSave,onClick={onSave(value.text.trim())}){Text("Save")}},
-        dismissButton={TextButton(onClick=onDismiss){Text("Cancel")}})
+    },confirmButton={RexButton("Save",{onSave(value.text.trim())},primary=true,enabled=canSave)},
+        dismissButton={RexButton("Cancel",onDismiss)})
 }
