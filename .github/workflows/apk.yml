@@ -1,8 +1,10 @@
 # Builds the release APK and publishes it as a GitHub release.
 #
-# Runs on pushes to main, by hand (Actions → APK → Run workflow), and daily:
-# the daily run merges shulhi/rexling's main first and builds only when it
-# brought something new.
+# Runs on pushes to main, by hand (Actions → APK → Run workflow), and daily.
+# The daily run fast-forwards upstream-tracking to shulhi/rexling's main, then
+# merges upstream-tracking into main, and builds only when that brought
+# something new. If the merge conflicts, nothing is pushed and the run fails;
+# resolve it locally with `git merge upstream-tracking`.
 #
 # Signing uses a stable key from repository secrets, so each release installs
 # over the previous one:
@@ -14,7 +16,7 @@ name: APK
 
 on:
   push:
-    branches: [main, "ci/**"]
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "17 3 * * *"
@@ -47,12 +49,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch https://github.com/shulhi/rexling.git main
+          # upstream-tracking only ever mirrors upstream, so this never conflicts.
+          git push origin FETCH_HEAD:refs/heads/upstream-tracking
           if git merge-base --is-ancestor FETCH_HEAD HEAD; then
             echo "Nothing new upstream."
             echo "build=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git merge --no-edit FETCH_HEAD
+          if ! git merge --no-edit -m "Merge upstream-tracking into main" FETCH_HEAD; then
+            echo "::error::upstream-tracking conflicts with main. Merge it locally."
+            exit 1
+          fi
           git push origin HEAD:main
           echo "build=true" >> "$GITHUB_OUTPUT"
 
