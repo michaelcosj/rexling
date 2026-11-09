@@ -41,6 +41,17 @@ impl Mode {
     }
 }
 
+/// What runs in the pane, as far as prediction cares.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Program {
+    /// Anything that redraws its input itself; never predicted.
+    Other,
+    /// A shell at its prompt.
+    Shell,
+    /// pi, which never asks for passwords, so its next message is shown at once after Enter.
+    Pi,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     /// A typed character; confirmed once the server cursor has moved past it.
@@ -84,6 +95,9 @@ pub(crate) struct Predictor {
     /// Where typing started on the current line. Backspace is only guessed over text typed here,
     /// never over the prompt.
     floor: Option<(u16, u16)>,
+    /// After Enter in pi: the server cursor at that moment. Prediction resumes, still visible,
+    /// once a frame shows pi's cursor somewhere else.
+    awaiting: Option<((u16, u16), Instant)>,
     base: Option<Arc<Frame>>,
     target: String,
 }
@@ -110,6 +124,7 @@ impl Predictor {
             predictions: Vec::new(),
             cursor: None,
             floor: None,
+            awaiting: None,
             base: None,
             target: String::new(),
         }
@@ -128,6 +143,7 @@ impl Predictor {
         self.predictions.clear();
         self.cursor = None;
         self.floor = None;
+        self.awaiting = None;
         self.epoch += 1;
     }
 
@@ -135,6 +151,7 @@ impl Predictor {
         self.epoch += 1;
         self.cursor = None;
         self.floor = None;
+        self.awaiting = None;
     }
 
     fn timeout(&self) -> Duration {
@@ -218,12 +235,11 @@ impl Predictor {
         }
     }
 
-    /// Records predictions for input about to be sent to `target`. `allowed` is false for programs
-    /// that redraw input themselves, where guessing would flicker.
-    pub fn input(&mut self, target: &str, text: &str, allowed: bool, now: Instant) {
+    /// Records predictions for input about to be sent to `target`.
+    pub fn input(&mut self, target: &str, text: &str, program: Program, now: Instant) {
         self.retarget(target);
         let Some(frame) = self.base.clone() else { return };
-        if self.mode == Mode::Off || !allowed || !Self::eligible(&frame) {
+        if self.mode == Mode::Off || program == Program::Other || !Self::eligible(&frame) {
             self.reset();
             return;
         }
@@ -235,6 +251,17 @@ impl Predictor {
         let hidden_cursor = frame.cursor.is_none();
         let Some(origin) = frame.cursor_at else { return };
         for c in text.chars() {
+            if c == '\r' && program == Program::Pi && self.awaiting.is_none() {
+                // pi submits the message and clears its editor; wait for that frame, staying visible.
+                self.cursor = None;
+                self.floor = None;
+                self.awaiting = Some((origin, now));
+                continue;
+            }
+            if self.awaiting.is_some() {
+                // Typed before pi redrew: we cannot tell where it lands, so fall back to hidden guesses.
+                self.tentative();
+            }
             let Some((x, y)) = self.cursor.or(frame.cursor_at) else { return };
             match c {
                 ' '..='~' => {
@@ -313,6 +340,13 @@ impl Predictor {
     /// Checks predictions against a new server frame.
     pub fn observe(&mut self, frame: Arc<Frame>, now: Instant) {
         let previous = self.base.replace(frame.clone());
+        if let Some((origin, _)) = self.awaiting
+            && frame.cursor_at.is_some_and(|at| at != origin)
+        {
+            // pi has handled Enter, so every earlier key too; leftovers would cover its cleared editor.
+            self.awaiting = None;
+            self.predictions.clear();
+        }
         if self.predictions.is_empty() {
             return;
         }
@@ -386,6 +420,10 @@ impl Predictor {
     /// Drops guesses the server never answered, even when no frames arrive. Returns true if any went.
     pub fn expire(&mut self, now: Instant) -> bool {
         let timeout = self.timeout();
+        if self.awaiting.is_some_and(|(_, at)| now.saturating_duration_since(at) > timeout) {
+            // pi's cursor never moved (an empty Enter); predict from the current frame again.
+            self.awaiting = None;
+        }
         if self.predictions.iter().any(|p| now.saturating_duration_since(p.at) > timeout) {
             self.predictions.clear();
             self.tentative();
@@ -394,6 +432,7 @@ impl Predictor {
         false
     }
 
+    #[cfg(test)]
     pub fn pending(&self) -> bool {
         !self.predictions.is_empty()
     }
@@ -447,14 +486,21 @@ impl Predictor {
     }
 }
 
-/// Programs whose input echoes like a line editor: shells at their prompt, and pi.
-pub(crate) fn predictable_program(candidates: &serde_json::Value) -> bool {
+/// Shells at their prompt and pi echo typing like a line editor; anything else is left alone.
+pub(crate) fn program(candidates: &serde_json::Value) -> Program {
     const SHELLS: [&str; 9] = ["fish", "zsh", "bash", "sh", "dash", "ash", "ksh", "mksh", "nu"];
-    candidates.as_array().into_iter().flatten().filter_map(|c| c.as_str()).any(|candidate| {
+    let mut found = Program::Other;
+    for candidate in candidates.as_array().into_iter().flatten().filter_map(|c| c.as_str()) {
         let path = candidate.replace('\\', "/").to_lowercase();
         let name = path.rsplit('/').next().unwrap_or("").trim_start_matches('-');
-        SHELLS.contains(&name) || name == "pi" || path.contains("/pi-coding-agent/")
-    })
+        if name == "pi" || path.contains("/pi-coding-agent/") {
+            return Program::Pi;
+        }
+        if SHELLS.contains(&name) {
+            found = Program::Shell;
+        }
+    }
+    found
 }
 
 #[cfg(test)]
@@ -516,7 +562,7 @@ mod tests {
         p.set_mode(Mode::Always);
         let f = frame(&["$"], (2, 0), true, 0);
         p.observe(f.clone(), start);
-        p.input("t", "e", true, start);
+        p.input("t", "e", Program::Shell, start);
         let echoed = frame(&["$ e"], (3, 0), true, 0);
         p.observe(echoed.clone(), start + Duration::from_millis(200));
         (p, echoed)
@@ -529,12 +575,12 @@ mod tests {
         p.set_mode(Mode::Always);
         let f = frame(&["$"], (2, 0), true, 0);
         p.observe(f.clone(), now);
-        p.input("t", "e", true, now);
+        p.input("t", "e", Program::Shell, now);
         assert_eq!(row(&p.display(f.clone()), 0), "$");
         let echoed = frame(&["$ e"], (3, 0), true, 0);
         p.observe(echoed.clone(), now + Duration::from_millis(200));
         assert!(!p.pending());
-        p.input("t", "cho", true, now);
+        p.input("t", "cho", Program::Shell, now);
         let shown = p.display(echoed);
         assert_eq!(row(&shown, 0), "$ echo");
         assert_eq!(shown.cursor, Some((6, 0)));
@@ -545,7 +591,7 @@ mod tests {
         let now = Instant::now();
         let (mut p, f) = warmed(now);
         assert_eq!(p.srtt(), Some(Duration::from_millis(200)));
-        p.input("t", "ls", true, now);
+        p.input("t", "ls", Program::Shell, now);
         assert!(p.pending());
         // A frame from before the server saw the keys confirms nothing.
         p.observe(f.clone(), now + Duration::from_millis(50));
@@ -561,13 +607,13 @@ mod tests {
         let mut p = Predictor::new();
         let f = frame(&["$"], (2, 0), true, 0);
         p.observe(f.clone(), now);
-        p.input("t", "a", true, now);
+        p.input("t", "a", Program::Shell, now);
         p.observe(frame(&["$ a"], (3, 0), true, 0), now + Duration::from_millis(5));
-        p.input("t", "b", true, now);
+        p.input("t", "b", Program::Shell, now);
         assert_eq!(row(&p.display(frame(&["$ a"], (3, 0), true, 0)), 0), "$ a", "fast link: no overlay");
         let (mut slow, echoed) = warmed(now);
         slow.set_mode(Mode::Slow);
-        slow.input("t", "x", true, now);
+        slow.input("t", "x", Program::Shell, now);
         assert_eq!(row(&slow.display(echoed), 0), "$ ex");
     }
 
@@ -575,7 +621,7 @@ mod tests {
     fn predictions_are_underlined_on_very_slow_links() {
         let now = Instant::now();
         let (mut p, f) = warmed(now);
-        p.input("t", "x", true, now);
+        p.input("t", "x", Program::Shell, now);
         let shown = p.display(f);
         let cell = cell_at(&shown, 3, 0).unwrap();
         assert_ne!(cell.attributes & PREDICTED, 0);
@@ -585,10 +631,10 @@ mod tests {
     fn enter_starts_a_hidden_epoch_so_unechoed_passwords_never_show() {
         let now = Instant::now();
         let (mut p, _) = warmed(now);
-        p.input("t", "\r", true, now);
+        p.input("t", "\r", Program::Shell, now);
         let prompt = frame(&["$ e", "Password:"], (10, 1), true, 0);
         p.observe(prompt.clone(), now + Duration::from_millis(250));
-        p.input("t", "hunter2", true, now + Duration::from_millis(260));
+        p.input("t", "hunter2", Program::Shell, now + Duration::from_millis(260));
         assert_eq!(row(&p.display(prompt.clone()), 1), "Password:");
         // The prompt never echoes; the guesses expire without ever being drawn.
         p.observe(prompt.clone(), now + Duration::from_secs(5));
@@ -600,14 +646,14 @@ mod tests {
     fn a_wrong_guess_is_removed_and_later_input_waits_for_confirmation() {
         let now = Instant::now();
         let (mut p, f) = warmed(now);
-        p.input("t", "q", true, now);
+        p.input("t", "q", Program::Shell, now);
         assert_eq!(row(&p.display(f.clone()), 0), "$ eq");
         // The program does something else with q; after the timeout the guess goes away.
         let other = frame(&["$ e", "quit?"], (5, 1), true, 0);
         p.observe(other.clone(), now + Duration::from_secs(3));
         assert!(!p.pending());
         assert_eq!(row(&p.display(other.clone()), 0), "$ e");
-        p.input("t", "y", true, now + Duration::from_secs(3));
+        p.input("t", "y", Program::Shell, now + Duration::from_secs(3));
         assert_eq!(row(&p.display(other), 1), "quit?", "hidden until confirmed");
     }
 
@@ -615,7 +661,7 @@ mod tests {
     fn backspace_at_the_end_of_a_line_is_predicted() {
         let now = Instant::now();
         let (mut p, f) = warmed(now);
-        p.input("t", "ab\x7f", true, now);
+        p.input("t", "ab\x7f", Program::Shell, now);
         let shown = p.display(f.clone());
         assert_eq!(row(&shown, 0), "$ ea");
         assert_eq!(shown.cursor, Some((4, 0)));
@@ -627,16 +673,16 @@ mod tests {
     fn backspace_before_a_suggestion_moves_only_the_cursor_and_typing_stays_instant() {
         let now = Instant::now();
         let (mut p, _) = warmed(now);
-        p.input("t", "c", true, now);
+        p.input("t", "c", Program::Shell, now);
         // fish echoes c and shows a suggestion after it.
         let suggestion = frame(&["$ echo hi"], (4, 0), true, 0);
         p.observe(suggestion.clone(), now + Duration::from_millis(200));
         assert!(!p.pending());
-        p.input("t", "\x7f", true, now);
+        p.input("t", "\x7f", Program::Shell, now);
         let shown = p.display(suggestion.clone());
         assert_eq!(row(&shown, 0), "$ echo hi", "the shell redraws the suggestion itself");
         assert_eq!(shown.cursor, Some((3, 0)));
-        p.input("t", "x", true, now);
+        p.input("t", "x", Program::Shell, now);
         let shown = p.display(suggestion);
         assert_eq!(row(&shown, 0), "$ exho hi", "typing after a correction is not held back");
         assert_eq!(shown.cursor, Some((4, 0)));
@@ -648,10 +694,10 @@ mod tests {
     fn backspace_is_never_guessed_over_the_prompt() {
         let now = Instant::now();
         let (mut p, f) = warmed(now);
-        p.input("t", "\x7f", true, now);
+        p.input("t", "\x7f", Program::Shell, now);
         assert_eq!(row(&p.display(f.clone()), 0), "$");
         let before = p.predictions.len();
-        p.input("t", "\x7f", true, now);
+        p.input("t", "\x7f", Program::Shell, now);
         assert_eq!(p.predictions.len(), before, "the second backspace would reach the prompt");
         assert_eq!(row(&p.display(f), 0), "$");
     }
@@ -660,7 +706,7 @@ mod tests {
     fn a_guess_the_server_has_moved_past_is_dropped_at_once() {
         let now = Instant::now();
         let (mut p, _) = warmed(now);
-        p.input("t", "gs ", true, now);
+        p.input("t", "gs ", Program::Shell, now);
         // A fish abbreviation expands on space; the server cursor ends up far to the right.
         let expanded = frame(&["$ egit status"], (14, 0), true, 0);
         p.observe(expanded.clone(), now + Duration::from_millis(300));
@@ -674,11 +720,11 @@ mod tests {
         let mut p = Predictor::new();
         p.set_mode(Mode::Always);
         p.observe(frame(&["> ^"], (2, 0), false, 0), now);
-        p.input("t", "hi", true, now);
+        p.input("t", "hi", Program::Shell, now);
         let typed = frame(&["> hi^"], (4, 0), false, 0);
         p.observe(typed.clone(), now + Duration::from_millis(200));
         assert!(!p.pending());
-        p.input("t", "\x7f", true, now);
+        p.input("t", "\x7f", Program::Shell, now);
         let shown = p.display(typed);
         assert_eq!(row(&shown, 0), "> h");
         assert_ne!(cell_at(&shown, 3, 0).unwrap().attributes & INVERSE, 0);
@@ -694,10 +740,10 @@ mod tests {
         let mut alt = (*f).clone_frame();
         alt.input_flags = ALTERNATE_SCREEN;
         p.observe(Arc::new(alt), now);
-        p.input("t", "j", true, now);
+        p.input("t", "j", Program::Shell, now);
         assert!(!p.pending());
         let (mut p, f) = warmed(now);
-        p.input("t", "j", false, now);
+        p.input("t", "j", Program::Other, now);
         assert!(!p.pending());
         assert_eq!(row(&p.display(f), 0), "$ e");
         let (mut p, _) = warmed(now);
@@ -705,7 +751,7 @@ mod tests {
         let mut scrolled = (*scrolled).clone_frame();
         scrolled.scroll_offset = 2;
         p.observe(Arc::new(scrolled), now);
-        p.input("t", "j", true, now);
+        p.input("t", "j", Program::Shell, now);
         assert!(!p.pending());
     }
 
@@ -713,8 +759,8 @@ mod tests {
     fn switching_panes_forgets_predictions() {
         let now = Instant::now();
         let (mut p, f) = warmed(now);
-        p.input("t", "x", true, now);
-        p.input("other", "y", true, now);
+        p.input("t", "x", Program::Shell, now);
+        p.input("other", "y", Program::Shell, now);
         let shown = p.display(f);
         assert_eq!(row(&shown, 0), "$ e", "a new pane starts hidden again");
     }
@@ -726,9 +772,9 @@ mod tests {
         p.set_mode(Mode::Always);
         let f = frame(&["a", "b", "c", "$"], (2, 3), true, 0);
         p.observe(f, now);
-        p.input("t", "e", true, now);
+        p.input("t", "e", Program::Shell, now);
         p.observe(frame(&["a", "b", "c", "$ e"], (3, 3), true, 0), now + Duration::from_millis(200));
-        p.input("t", "x", true, now);
+        p.input("t", "x", Program::Shell, now);
         // Output scrolls the screen by one line before the echo arrives.
         let scrolled = frame(&["b", "c", "$ e", "!"], (3, 2), true, 1);
         p.observe(scrolled.clone(), now + Duration::from_millis(250));
@@ -742,10 +788,10 @@ mod tests {
         p.set_mode(Mode::Always);
         let f = frame(&["> ^"], (2, 0), false, 0);
         p.observe(f, now);
-        p.input("t", "h", true, now);
+        p.input("t", "h", Program::Shell, now);
         p.observe(frame(&["> h^"], (3, 0), false, 0), now + Duration::from_millis(200));
         assert!(!p.pending());
-        p.input("t", "i", true, now);
+        p.input("t", "i", Program::Shell, now);
         let shown = p.display(frame(&["> h^"], (3, 0), false, 0));
         assert_eq!(row(&shown, 0), "> hi");
         assert_eq!(cell_at(&shown, 3, 0).unwrap().attributes & INVERSE, 0);
@@ -755,11 +801,65 @@ mod tests {
         assert!(!p.pending());
     }
 
+    /// pi with "hi" typed and confirmed in its editor on row 1.
+    fn pi_with_text(now: Instant) -> Predictor {
+        let mut p = Predictor::new();
+        p.set_mode(Mode::Always);
+        p.observe(frame(&["", "> ^"], (2, 1), false, 0), now);
+        p.input("t", "hi", Program::Pi, now);
+        p.observe(frame(&["", "> hi^"], (4, 1), false, 0), now + Duration::from_millis(200));
+        assert!(!p.pending());
+        p
+    }
+
+    #[test]
+    fn pi_shows_the_next_message_at_once_after_enter() {
+        let now = Instant::now();
+        let mut p = pi_with_text(now);
+        p.input("t", "\r", Program::Pi, now);
+        // pi prints the message above and clears its editor.
+        let cleared = frame(&["hi", "> ^"], (2, 1), false, 0);
+        p.observe(cleared.clone(), now + Duration::from_millis(400));
+        p.input("t", "ok", Program::Pi, now + Duration::from_secs(5));
+        assert_eq!(row(&p.display(cleared), 1), "> ok", "no wait for an echo after Enter");
+    }
+
+    #[test]
+    fn unconfirmed_text_does_not_linger_over_pi_cleared_editor() {
+        let now = Instant::now();
+        let mut p = pi_with_text(now);
+        p.input("t", "!\r", Program::Pi, now);
+        let cleared = frame(&["hi!", "> ^"], (2, 1), false, 0);
+        p.observe(cleared.clone(), now + Duration::from_millis(400));
+        assert!(!p.pending());
+        assert_eq!(row(&p.display(cleared), 1), ">");
+    }
+
+    #[test]
+    fn typing_before_pi_redraws_falls_back_to_hidden_guesses() {
+        let now = Instant::now();
+        let mut p = pi_with_text(now);
+        let stale = frame(&["", "> hi^"], (4, 1), false, 0);
+        p.input("t", "\ro", Program::Pi, now);
+        assert_eq!(row(&p.display(stale), 1), "> hi");
+    }
+
+    #[test]
+    fn enter_in_a_shell_still_hides_the_next_command() {
+        let now = Instant::now();
+        let (mut p, _) = warmed(now);
+        p.input("t", "\r", Program::Shell, now);
+        let prompt = frame(&["$ e", "$"], (2, 1), true, 0);
+        p.observe(prompt.clone(), now + Duration::from_millis(300));
+        p.input("t", "ls", Program::Shell, now + Duration::from_secs(5));
+        assert_eq!(row(&p.display(prompt), 1), "$");
+    }
+
     #[test]
     fn expiry_clears_guesses_when_the_server_goes_quiet() {
         let now = Instant::now();
         let (mut p, _) = warmed(now);
-        p.input("t", "x", true, now);
+        p.input("t", "x", Program::Shell, now);
         assert!(!p.expire(now + Duration::from_millis(500)));
         assert!(p.expire(now + Duration::from_secs(3)));
         assert!(!p.pending());
@@ -767,12 +867,12 @@ mod tests {
 
     #[test]
     fn shells_and_pi_are_predictable_other_programs_are_not() {
-        assert!(predictable_program(&json!(["-fish", "fish"])));
-        assert!(predictable_program(&json!(["/bin/zsh"])));
-        assert!(predictable_program(&json!(["pi", "/x/@earendil-works/pi-coding-agent/dist/cli.js", "bun"])));
-        assert!(!predictable_program(&json!(["nvim"])));
-        assert!(!predictable_program(&json!(["claude-code", "node"])));
-        assert!(!predictable_program(&json!(null)));
+        assert_eq!(program(&json!(["-fish", "fish"])), Program::Shell);
+        assert_eq!(program(&json!(["/bin/zsh"])), Program::Shell);
+        assert_eq!(program(&json!(["pi", "/x/@earendil-works/pi-coding-agent/dist/cli.js", "bun"])), Program::Pi);
+        assert_eq!(program(&json!(["nvim"])), Program::Other);
+        assert_eq!(program(&json!(["claude-code", "node"])), Program::Other);
+        assert_eq!(program(&json!(null)), Program::Other);
     }
 
     trait CloneFrame {

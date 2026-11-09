@@ -428,7 +428,7 @@ impl Actor {
                         self.program_task=Some(program_task(self.endpoint.clone().unwrap(),self.selected_session.clone(),ids));
                         self.program_refresh=tokio::time::Instant::now()+Duration::from_secs(4);
                     }
-                    if self.predictor.pending() && self.predictor.expire(std::time::Instant::now()) {self.dirty=true;}
+                    if self.predictor.expire(std::time::Instant::now()) {self.dirty=true;}
                     if self.dirty && self.visible {
                         self.dirty=false;
                         if let Some(replica)=self.replica.as_mut().filter(|r|r.ready()) {
@@ -801,8 +801,8 @@ impl Actor {
         } else {value["text"].as_str().context("text required")?};
         if value["type"]=="input" {
             // Guess the echo locally; the next render draws it before the server answers.
-            let allowed=crate::prediction::predictable_program(&self.programs[target.block.as_str()]);
-            self.predictor.input(&prediction_key(&target),text,allowed,std::time::Instant::now());
+            let program=crate::prediction::program(&self.programs[target.block.as_str()]);
+            self.predictor.input(&prediction_key(&target),text,program,std::time::Instant::now());
         } else if !click {self.predictor.reset();}
         if !click && let Some(replica)=self.replica.as_mut().filter(|r|r.ready()) {replica.terminal()?.scroll_to_bottom();self.dirty=true;}
         // Unlike terminal.write, block.event is serialized by Rex on this connection.
