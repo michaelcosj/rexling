@@ -15,7 +15,8 @@ import androidx.compose.ui.unit.dp
 @Composable internal fun PreferencesSheet(onAppearance: ()->Unit,onFont: ()->Unit,onAlerts: ()->Unit,onAbout: ()->Unit,onClose: ()->Unit,
     shortcutGesture: ControlShortcutGesture=ControlShortcutGesture.HOLD,onShortcutGesture: (ControlShortcutGesture)->Unit={},onShortcuts: ()->Unit={},
     arrowJoystickEnabled: Boolean=true,onArrowJoystick: (Boolean)->Unit={},codexTitleAttention: Boolean=false,onCodexTitleAttention: (Boolean)->Unit={},
-    terminalPadding: TerminalPadding=TerminalPadding.NORMAL,onTerminalPadding: (TerminalPadding)->Unit={},extendPadding: Boolean=true,onExtendPadding: (Boolean)->Unit={}) {
+    terminalPadding: TerminalPadding=TerminalPadding.NORMAL,onTerminalPadding: (TerminalPadding)->Unit={},extendPadding: Boolean=true,onExtendPadding: (Boolean)->Unit={},
+    predictiveEcho: PredictiveEcho=PredictiveEcho.SLOW,onPredictiveEcho: (PredictiveEcho)->Unit={}) {
     RexSheet(onDismissRequest=onClose) {
         Column(Modifier.fillMaxWidth().heightIn(max=680.dp).verticalScroll(rememberScrollState()).padding(horizontal=20.dp).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             SettingsHeader("Preferences","Close preferences",onClose)
@@ -40,6 +41,8 @@ import androidx.compose.ui.unit.dp
             }
             SettingsSection("Connections") {
                 SettingsRow("Background alerts","Task completions and attention alerts",SettingsGlyph.ALERTS,onAlerts)
+                SettingsDivider()
+                SettingsChoiceRow("Predictive echo",PredictiveEcho.entries,predictiveEcho,{it.label},onPredictiveEcho,subtitle=predictiveEcho.detail)
             }
             SettingsSection("Experimental") {
                 SettingsToggleRow("Codex title attention",codexTitleAttention,onCodexTitleAttention,

@@ -182,6 +182,8 @@ struct Actor {
     sessions: Value,
     windows: Value,
     screen: Option<Arc<Frame>>,
+    /// Predictive local echo; `screen` is the server frame with its guesses drawn over it.
+    predictor: crate::prediction::Predictor,
     selected_session: String,
     selected_block: String,
     navigation_id: u64,
@@ -245,6 +247,7 @@ impl Actor {
             sessions: json!([]),
             windows: json!([]),
             screen: None,
+            predictor: crate::prediction::Predictor::new(),
             selected_session: String::new(),
             selected_block: String::new(),
             navigation_id: 0,
@@ -442,11 +445,18 @@ impl Actor {
                         self.program_task=Some(program_task(self.endpoint.clone().unwrap(),self.selected_session.clone(),ids));
                         self.program_refresh=tokio::time::Instant::now()+Duration::from_secs(4);
                     }
+                    if self.predictor.pending() && self.predictor.expire(std::time::Instant::now()) {self.dirty=true;}
                     if self.dirty && self.visible {
                         self.dirty=false;
                         if let Some(replica)=self.replica.as_mut().filter(|r|r.ready()) {
                             match replica.terminal().and_then(|t|t.frame()) {
-                                Ok(frame)=>{self.screen=Some(Arc::new(frame));self.publish_frame();}
+                                Ok(frame)=>{
+                                    let frame=Arc::new(frame);
+                                    let target=self.input_target();
+                                    self.predictor.retarget(&prediction_key(&target));
+                                    self.predictor.observe(frame.clone(),std::time::Instant::now());
+                                    self.screen=Some(self.predictor.display(frame));self.publish_frame();
+                                }
                                 Err(e)=>{self.error=e.to_string();self.publish();}
                             }
                         }
@@ -806,6 +816,11 @@ impl Actor {
             if encoded.is_empty() {return Ok(());}
             encoded.as_str()
         } else {value["text"].as_str().context("text required")?};
+        if value["type"]=="input" {
+            // Guess the echo locally; the next render draws it before the server answers.
+            let allowed=crate::prediction::predictable_program(&self.programs[target.block.as_str()]);
+            self.predictor.input(&prediction_key(&target),text,allowed,std::time::Instant::now());
+        } else if !click {self.predictor.reset();}
         if !click && let Some(replica)=self.replica.as_mut().filter(|r|r.ready()) {replica.terminal()?.scroll_to_bottom();self.dirty=true;}
         // Unlike terminal.write, block.event is serialized by Rex on this connection.
         // An unidentified key with text preserves our already-encoded input bytes;
@@ -866,6 +881,10 @@ impl Actor {
                 self.windows = json!([]);
                 self.sessions = json!([]);
                 self.publish();
+            }
+            "prediction" => {
+                let mode=value["mode"].as_str().and_then(crate::prediction::Mode::parse).context("prediction mode must be off, slow or always")?;
+                self.predictor.set_mode(mode);self.dirty=true;
             }
             "retry" | "network" => {
                 let network=value["type"]=="network";
@@ -1515,6 +1534,8 @@ fn program_candidates(process: &Value, status: &Value) -> Value {
     }
     json!(names)
 }
+/// Predictions belong to one pane on one connection.
+fn prediction_key(target: &Target) -> String {format!("{}\n{}\n{}",target.session,target.block,target.connection)}
 fn missing_terminal(error: &anyhow::Error) -> bool {
     error.downcast_ref::<rex_core::control::RpcError>().is_some_and(|e|matches!(e.code.as_str(),"not_found"|"session_not_found"))
 }

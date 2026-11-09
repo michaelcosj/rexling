@@ -308,7 +308,8 @@ if(picker=="sessions") SessionSwitcher(model.sessionTargets,currentSessionKey,mo
         onClose={preferencesOpen=false},shortcutGesture=model.shortcutGesture,onShortcutGesture=model::changeShortcutGesture,
         onShortcuts={preferencesOpen=false;shortcutSettings=true},arrowJoystickEnabled=model.arrowJoystickEnabled,onArrowJoystick=model::changeArrowJoystick,
         codexTitleAttention=model.experimentalCodexAttention,onCodexTitleAttention=model::changeCodexAttention,
-        terminalPadding=model.terminalPadding,onTerminalPadding=model::changeTerminalPadding,extendPadding=model.extendPadding,onExtendPadding=model::changeExtendPadding)
+        terminalPadding=model.terminalPadding,onTerminalPadding=model::changeTerminalPadding,extendPadding=model.extendPadding,onExtendPadding=model::changeExtendPadding,
+        predictiveEcho=model.predictiveEcho,onPredictiveEcho=model::changePredictiveEcho)
     if(shortcutSettings && editingProfile==null) ShortcutProfilesSheet(model.shortcutProfiles,onEdit={editingProfile=it},onNew={editingProfile=""},
         onEnabled=model::enableShortcutProfile,onClose={shortcutSettings=false},
         layout=model.neovimShortcutLayout,onLayout=model::changeNeovimShortcutLayout,effect=model.neovimShortcutEffect,onEffect=model::changeNeovimShortcutEffect,

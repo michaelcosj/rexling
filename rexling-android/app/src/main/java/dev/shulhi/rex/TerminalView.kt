@@ -285,7 +285,7 @@ class TerminalView(context: Context) : View(context) {
                 }
             }
             paint.strokeWidth=resources.displayMetrics.density.coerceAtLeast(1f)
-            if(cell.attributes and 64!=0) canvas.drawLine(x,baseline+2,x+allocated,baseline+2,paint)
+            if(cell.attributes and 64!=0 || cell.attributes and PredictiveEcho.PREDICTED_CELL!=0) canvas.drawLine(x,baseline+2,x+allocated,baseline+2,paint)
             if(cell.attributes and 32!=0) canvas.drawLine(x,cellHeight/2,x+allocated,cellHeight/2,paint)
             paint.alpha=255
         }

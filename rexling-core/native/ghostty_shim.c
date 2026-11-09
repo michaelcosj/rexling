@@ -212,7 +212,8 @@ int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
   frame->scroll_visible=scrollbar.len;
   r=rp_input_flags(t,&frame->input_flags);if(r!=0)return r;
   frame->cursor_x=cursor.viewport_x; frame->cursor_y=cursor.viewport_y;
-  frame->cursor_visible=cursor.visible && cursor.viewport_has_value;
+  // Bit 0: drawn cursor. Bit 1: position known even when hidden, as TUIs park it for IMEs.
+  frame->cursor_visible=(cursor.visible && cursor.viewport_has_value) | (cursor.viewport_has_value<<1);
   memcpy(frame->foreground,&colors.foreground,3);
   memcpy(frame->background,&colors.background,3);
   GET(GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,&t->rows);

@@ -196,6 +196,7 @@ mod wire_tests {
             columns: 100,
             rows: 50,
             cursor: Some((0, 0)),
+            cursor_at: Some((0, 0)),
             foreground: [255; 3],
             background: [0; 3],
             cells: (0..50)
