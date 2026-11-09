@@ -14,6 +14,9 @@ terminal state.
 - **Shortcut profiles.** Floating shortcut menus for any program, not just Neovim.
   A Shell profile appears at the prompt; lines starting with `!` ask before
   running. Edit them under **Preferences → Shortcuts**.
+- **Predictive echo.** On slow connections, typing in shells and pi shows up
+  immediately, mosh-style, and is checked against the server's echo. Unconfirmed
+  text is underlined. **Preferences → Predictive echo**.
 - **Rex-styled settings.** Preferences, menus and dialogs redesigned to match the
   terminal UI.
 - **Terminal padding** options.
