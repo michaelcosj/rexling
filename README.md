@@ -11,12 +11,13 @@ terminal state.
 
 ## What's different in this fork
 
+- **Shortcut profiles.** Floating shortcut menus for any program, not just Neovim.
+  A Shell profile appears at the prompt; lines starting with `!` ask before
+  running. Edit them under **Preferences → Shortcuts**.
+- **Rex-styled settings.** Preferences, menus and dialogs redesigned to match the
+  terminal UI.
 - **Terminal padding** options.
 - **CI builds.** Signed release APKs built on GitHub Actions.
-- **Shortcut profiles** *(in progress)*. Floating shortcut menus for any program,
-  not just Neovim, including the shell prompt.
-- **Rex-styled settings** *(in progress)*. Preferences and menus redesigned to match
-  the terminal UI.
 
 Changes that might be useful to everyone are offered upstream as pull requests.
 See [Branches](#branches).
