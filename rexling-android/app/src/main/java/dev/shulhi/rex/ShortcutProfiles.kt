@@ -34,8 +34,12 @@ internal object ShortcutProfiles {
         gs = git status
         gd = git diff
         log = git log --oneline -20
-        ls = ls -la
         !push = git push
+        [pi]
+        pi = pi
+        continue = pi --continue
+        []
+        ls = ls -la
         clear
     """.trimIndent())
 
