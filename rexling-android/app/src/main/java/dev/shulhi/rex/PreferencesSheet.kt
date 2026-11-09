@@ -14,7 +14,8 @@ import androidx.compose.ui.unit.dp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable internal fun PreferencesSheet(onAppearance: ()->Unit,onFont: ()->Unit,onAlerts: ()->Unit,onAbout: ()->Unit,onClose: ()->Unit,
     shortcutGesture: ControlShortcutGesture=ControlShortcutGesture.HOLD,onShortcutGesture: (ControlShortcutGesture)->Unit={},onNeovim: ()->Unit={},
-    arrowJoystickEnabled: Boolean=true,onArrowJoystick: (Boolean)->Unit={},codexTitleAttention: Boolean=false,onCodexTitleAttention: (Boolean)->Unit={}) {
+    arrowJoystickEnabled: Boolean=true,onArrowJoystick: (Boolean)->Unit={},codexTitleAttention: Boolean=false,onCodexTitleAttention: (Boolean)->Unit={},
+    predictiveEcho: PredictiveEcho=PredictiveEcho.SLOW,onPredictiveEcho: (PredictiveEcho)->Unit={}) {
     ModalBottomSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().heightIn(max=680.dp).verticalScroll(rememberScrollState()).padding(horizontal=20.dp).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
             SettingsHeader("Preferences","Close preferences",onClose)
@@ -48,6 +49,16 @@ import androidx.compose.ui.unit.dp
             }
             SettingsSection("Connections") {
                 SettingsRow("Background alerts","Task completions and attention alerts",SettingsGlyph.ALERTS,onAlerts)
+                SettingsDivider()
+                Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                    Text("Predictive echo",style=SettingsType.row)
+                    Text(predictiveEcho.detail,style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        PredictiveEcho.entries.forEach {mode->
+                            FilterChip(selected=predictiveEcho==mode,onClick={onPredictiveEcho(mode)},label={Text(mode.label,style=SettingsType.row)})
+                        }
+                    }
+                }
             }
             SettingsSection("Experimental") {
                 Row(Modifier.fillMaxWidth().toggleable(value=codexTitleAttention,role=androidx.compose.ui.semantics.Role.Switch,onValueChange=onCodexTitleAttention)

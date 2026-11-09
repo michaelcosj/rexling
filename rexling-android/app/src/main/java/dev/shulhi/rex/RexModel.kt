@@ -80,6 +80,12 @@ class RexModel @JvmOverloads constructor(application: Application, preferenceNam
         if(profile==null) {onCopied();images.notice="The original Rex server is no longer available.";return false}
         return images.start(uri,target,onCopied)
     }
+    internal var predictiveEcho by mutableStateOf(PredictiveEcho.fromPreference(preferences.getString("predictive_echo",null)))
+        private set
+    internal fun changePredictiveEcho(value: PredictiveEcho) {
+        predictiveEcho=value;preferences.edit {putString("predictive_echo",value.name)}
+        connections.values.forEach {it.updatePredictiveEcho(value)}
+    }
     internal var experimentalCodexAttention by mutableStateOf(preferences.getBoolean(CodexAttentionPolicy.ENABLED,false))
         private set
     internal fun changeCodexAttention(enabled: Boolean) {
@@ -212,6 +218,7 @@ class RexModel @JvmOverloads constructor(application: Application, preferenceNam
             client.visible=profile.id==activeServerId
             if(activityVisible) client.activity(true)
             palette?.let(client::updateTerminalTheme)
+            client.updatePredictiveEcho(predictiveEcho)
             if(!foreground) client.pause()
             observers[profile.id]=viewModelScope.launch {
                 client.chromeState.collect {state->

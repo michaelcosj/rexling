@@ -362,6 +362,7 @@ internal class RexConnection(application: Application, private val scope: Corout
             .put("cursor", hex(palette.accent))
             .put("palette", org.json.JSONArray(palette.ansi.mapIndexed { index, color -> "$index=${hex(color)}" })))
     }
+    fun updatePredictiveEcho(mode: PredictiveEcho) {command("prediction","mode" to mode.wire)}
     fun jumpLastSession() { if(state.value.sessions.any { it.id==lastSessionId }) selectSession(lastSessionId) }
     fun refreshSessionDetails() { if(state.value.connected) command("sessions_info") }
     fun prefetchPanes(ids: List<String>) {

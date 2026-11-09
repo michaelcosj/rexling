@@ -77,6 +77,8 @@ pub struct Frame {
     pub columns: u16,
     pub rows: u16,
     pub cursor: Option<(u16, u16)>,
+    /// The cursor position even while hidden; TUIs such as pi park it at their input.
+    pub cursor_at: Option<(u16, u16)>,
     pub foreground: [u8; 3],
     pub background: [u8; 3],
     pub cells: Vec<Cell>,
@@ -335,7 +337,8 @@ impl Terminal {
         Ok(Frame {
             columns: raw.columns,
             rows: raw.rows,
-            cursor: (raw.cursor_visible != 0).then_some((raw.cursor_x, raw.cursor_y)),
+            cursor: (raw.cursor_visible & 1 != 0).then_some((raw.cursor_x, raw.cursor_y)),
+            cursor_at: (raw.cursor_visible & 2 != 0).then_some((raw.cursor_x, raw.cursor_y)),
             foreground: raw.foreground,
             background: raw.background,
             scroll_total: raw.scroll_total,
