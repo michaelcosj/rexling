@@ -133,7 +133,7 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
 }
 
 @Composable internal fun NeovimRadialShortcutButton(items: List<NeovimShortcut>,target: String,enabled: Boolean,
-    onChoose: (NeovimShortcut,String)->Unit,modifier: Modifier,position: Offset,onPosition: (Offset)->Unit,bottomInset: Dp,effect: NeovimShortcutEffect,hapticsEnabled: Boolean) {
+    onChoose: (NeovimShortcut,String)->Unit,modifier: Modifier,position: Offset,onPosition: (Offset)->Unit,bottomInset: Dp,effect: NeovimShortcutEffect,hapticsEnabled: Boolean,name: String="Neovim") {
     val wheel=remember(target,items,effect) {NeovimWheelState(items)}
     DisposableEffect(wheel) {onDispose {wheel.close()}}
     val transition=key(wheel) {updateTransition(wheel.open && enabled,label="Neovim wheel visibility")}
@@ -178,10 +178,10 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
             IntOffset(at.x.roundToInt(),at.y.roundToInt())
         }.size(48.dp).onGloballyPositioned {coordinates=it}.systemGestureExclusion()
             .semantics {
-                contentDescription="Neovim shortcuts";role=Role.Button
+                contentDescription="$name shortcuts";role=Role.Button
                 if(enabled) {
                     onClick {if(wheel.open) wheel.center() else wheel.show();true}
-                    onLongClick(label="Steer Neovim shortcuts") {wheel.show();true}
+                    onLongClick(label="Steer $name shortcuts") {wheel.show();true}
                 } else disabled()
             }.pointerInput(enabled,wheel,range) {
                 if(!enabled) return@pointerInput
@@ -228,14 +228,14 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
                 }}
                 Popup(popupPositionProvider=provider,onDismissRequest={},
                     properties=PopupProperties(focusable=false,dismissOnClickOutside=false,dismissOnBackPress=false,clippingEnabled=false)) {
-                    NeovimShortcutWheel(wheel,width,effect,reveal,tick) {item->latestChoose(item,target)}
+                    NeovimShortcutWheel(wheel,width,effect,reveal,tick,name) {item->latestChoose(item,target)}
                 }
             }
         }
     }
 }
 
-@Composable private fun NeovimShortcutWheel(wheel: NeovimWheelState,width: Dp,effect: NeovimShortcutEffect,reveal: State<Float>,onTick: ()->Unit,onChoose: (NeovimShortcut)->Unit) {
+@Composable private fun NeovimShortcutWheel(wheel: NeovimWheelState,width: Dp,effect: NeovimShortcutEffect,reveal: State<Float>,onTick: ()->Unit,name: String,onChoose: (NeovimShortcut)->Unit) {
     val choose by rememberUpdatedState(onChoose)
     val config=LocalViewConfiguration.current
     val pageThreshold=with(LocalDensity.current) {28.dp.toPx()}
@@ -246,9 +246,9 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
     val visible=wheel.visible
     val centerSize=width*.42f
     Box(Modifier.size(width).onGloballyPositioned {wheel.bounds=Rect(it.localToScreen(Offset.Zero),Size(it.size.width.toFloat(),it.size.height.toFloat()))}
-        .semantics {contentDescription="Neovim shortcut menu";stateDescription=if(!wheel.open) "Closing" else if(wheel.group.isEmpty()) "Shortcuts" else "Group ${wheel.group}"}) {
+        .semantics {contentDescription="$name shortcut menu";stateDescription=if(!wheel.open) "Closing" else if(wheel.group.isEmpty()) "Shortcuts" else "Group ${wheel.group}"}) {
         Box(Modifier.fillMaxSize().systemGestureExclusion().semantics {
-            contentDescription="Neovim shortcut pages"
+            contentDescription="$name shortcut pages"
             if(wheel.open && wheel.pages>1) customActions=listOf(
                 CustomAccessibilityAction("Next shortcut page") {wheel.next(1);true},
                 CustomAccessibilityAction("Previous shortcut page") {wheel.next(-1);true})
@@ -329,7 +329,7 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
                 val labelWidth=if(wheel.slots==1) 76.dp else (width*(.71f*sin(PI/wheel.slots).toFloat())-4.dp).coerceIn(36.dp,76.dp)
                 Box(Modifier.offset(width*(.5f+.355f*cos(angle).toFloat())-labelWidth/2,width*(.5f+.355f*sin(angle).toFloat())-13.dp)
                     .width(labelWidth).height(26.dp).semantics(mergeDescendants=true) {
-                        contentDescription=if(item is NeovimShortcutEntry.Group) "Shortcut group ${item.label}" else "Neovim shortcut ${item.label}"
+                        contentDescription=if(item is NeovimShortcutEntry.Group) "Shortcut group ${item.label}" else "$name shortcut ${item.label}"
                         role=Role.Button;selected=wheel.highlighted==index
                         if(wheel.open) onClick {wheel.choose(index)?.let(choose);true} else disabled()
                     },contentAlignment=Alignment.Center) {
@@ -359,7 +359,7 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
             Column(Modifier.align(Alignment.Center).size(centerSize).padding(7.dp).graphicsLayer {
                 alpha=(reveal.value*6f).coerceIn(0f,1f)
             }.semantics {
-                contentDescription=if(!wheel.open) "Reopen Neovim shortcuts" else if(wheel.group.isEmpty()) "Close Neovim shortcuts" else "Back to all shortcuts"
+                contentDescription=if(!wheel.open) "Reopen $name shortcuts" else if(wheel.group.isEmpty()) "Close $name shortcuts" else "Back to all shortcuts"
                 role=Role.Button;stateDescription=wheel.visible.getOrNull(wheel.highlighted)?.label ?: "No command selected"
                 onClick {if(wheel.open) wheel.center() else wheel.show();true}
             },horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {

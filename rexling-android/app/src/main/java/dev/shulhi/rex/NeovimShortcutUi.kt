@@ -43,9 +43,9 @@ import androidx.compose.ui.window.PopupProperties
 import kotlin.math.roundToInt
 
 @Composable internal fun NeovimShortcutButton(items: List<NeovimShortcut>,target: String,enabled: Boolean,onChoose: (NeovimShortcut,String)->Unit,onCustomize: ()->Unit,modifier: Modifier=Modifier,
-    position: Offset=Offset(0f,1f),onPosition: (Offset)->Unit={},bottomInset: Dp=10.dp,layout: NeovimShortcutLayout=NeovimShortcutLayout.GRID,effect: NeovimShortcutEffect=NeovimShortcutEffect.FAN_OUT,hapticsEnabled: Boolean=true) {
+    position: Offset=Offset(0f,1f),onPosition: (Offset)->Unit={},bottomInset: Dp=10.dp,layout: NeovimShortcutLayout=NeovimShortcutLayout.GRID,effect: NeovimShortcutEffect=NeovimShortcutEffect.FAN_OUT,hapticsEnabled: Boolean=true,name: String="Neovim") {
     if(layout==NeovimShortcutLayout.CIRCULAR) {
-        NeovimRadialShortcutButton(items,target,enabled,onChoose,modifier,position,onPosition,bottomInset,effect,hapticsEnabled)
+        NeovimRadialShortcutButton(items,target,enabled,onChoose,modifier,position,onPosition,bottomInset,effect,hapticsEnabled,name)
         return
     }
     var open by remember(target) {mutableStateOf(false)}
@@ -77,13 +77,13 @@ import kotlin.math.roundToInt
                 onDragCancel={dragged=null},
                 onDragEnd={dragged?.let {savePosition(Offset(if(maxX>0) it.x/maxX else 0f,if(maxY>0) it.y/maxY else 1f))}})
         }) {
-        Box(Modifier.fillMaxSize().semantics {contentDescription="Neovim shortcuts"}
+        Box(Modifier.fillMaxSize().semantics {contentDescription="$name shortcuts"}
             .clickable(enabled=enabled,role=Role.Button) {open=!open},contentAlignment=Alignment.Center) {
             NeovimShortcutButtonFace(open,enabled,close=open)
         }
         if(open && enabled) {
             NeovimShortcutPopup(items,{onChoose(it,target)},{open=false;onCustomize()},{open=false},
-                width=popupWidth)
+                width=popupWidth,name=name)
         }
         }
     }
@@ -104,7 +104,7 @@ import kotlin.math.roundToInt
 }
 
 /** Six cells at a time, using the same compact treatment as the Ctrl shortcut grid. */
-@Composable private fun NeovimShortcutPopup(items: List<NeovimShortcut>,onChoose: (NeovimShortcut)->Unit,onCustomize: ()->Unit,onDismiss: ()->Unit,width: Dp) {
+@Composable private fun NeovimShortcutPopup(items: List<NeovimShortcut>,onChoose: (NeovimShortcut)->Unit,onCustomize: ()->Unit,onDismiss: ()->Unit,width: Dp,name: String) {
     val provider=rememberSpeechBubblePositioner()
     var group by remember(items) {mutableStateOf("")}
     var rootPage by remember(items) {mutableIntStateOf(0)}
@@ -120,7 +120,7 @@ import kotlin.math.roundToInt
         val repeatBase=if(pages>1) Int.MAX_VALUE/2-(Int.MAX_VALUE/2)%pages else 0
         val initialPage=if(group.isEmpty()) rootPage.coerceAtMost((pages-1).coerceAtLeast(0)) else 0
         val pager=rememberPagerState(initialPage=repeatBase+initialPage,pageCount={if(pages>1) Int.MAX_VALUE else 1})
-        SpeechBubble(provider,Modifier.width(width).semantics {contentDescription="Neovim shortcut menu";stateDescription=if(group.isEmpty()) "Shortcuts" else "Group $group"}) {
+        SpeechBubble(provider,Modifier.width(width).semantics {contentDescription="$name shortcut menu";stateDescription=if(group.isEmpty()) "Shortcuts" else "Group $group"}) {
         Column(Modifier.padding(5.dp),verticalArrangement=Arrangement.spacedBy(2.dp)) {
             if(hasGroups) Row(Modifier.fillMaxWidth().height(28.dp),verticalAlignment=Alignment.CenterVertically) {
                 if(group.isNotEmpty()) ChromeButton(ChromeIcon.LEFT,"Back to all shortcuts",modifier=Modifier.size(28.dp)) {group=""}
@@ -128,7 +128,7 @@ import kotlin.math.roundToInt
                     maxLines=1,overflow=TextOverflow.Ellipsis,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
             VerticalPager(pager,Modifier.fillMaxWidth().height((rows*40+(rows-1)*2).dp)
-                .semantics {contentDescription="Neovim shortcut pages"},userScrollEnabled=pages>1) {page->
+                .semantics {contentDescription="$name shortcut pages"},userScrollEnabled=pages>1) {page->
                 Column(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(2.dp)) {
                     repeat(rows) {row->
                         Row(Modifier.fillMaxWidth().height(40.dp),horizontalArrangement=Arrangement.spacedBy(2.dp)) {
@@ -156,65 +156,10 @@ import kotlin.math.roundToInt
                     Text("Customize shortcuts",Modifier.padding(horizontal=8.dp),fontSize=12.sp,color=MaterialTheme.colorScheme.primary)
                 }
                 if(pages>1) Text("${pager.currentPage%pages+1}/$pages",Modifier.padding(horizontal=8.dp),fontFamily=MonoUi,fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                ChromeButton(ChromeIcon.CLOSE,"Close Neovim shortcuts",modifier=Modifier.size(28.dp),onClick=onDismiss)
+                ChromeButton(ChromeIcon.CLOSE,"Close $name shortcuts",modifier=Modifier.size(28.dp),onClick=onDismiss)
             }
         }
         }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable internal fun NeovimShortcutsSheet(items: List<NeovimShortcut>,onSave: (String)->String?,onClose: ()->Unit,
-    enabled: Boolean=true,onEnabled: (Boolean)->Unit={},
-    layout: NeovimShortcutLayout=NeovimShortcutLayout.GRID,onLayout: (NeovimShortcutLayout)->Unit={},
-    effect: NeovimShortcutEffect=NeovimShortcutEffect.FAN_OUT,onEffect: (NeovimShortcutEffect)->Unit={},
-    hapticsEnabled: Boolean=true,onHaptics: (Boolean)->Unit={}) {
-    var draft by rememberSaveable {mutableStateOf(NeovimShortcuts.editorText(items))}
-    var error by remember {mutableStateOf<String?>(null)}
-    ModalBottomSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=MaterialTheme.colorScheme.surface) {
-        Column(Modifier.fillMaxWidth().heightIn(max=680.dp).verticalScroll(rememberScrollState()).padding(horizontal=20.dp).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            SettingsHeader("Neovim shortcuts","Close Neovim shortcuts",onClose)
-            Row(Modifier.fillMaxWidth().toggleable(enabled,role=Role.Switch,onValueChange=onEnabled).padding(vertical=8.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically) {
-                Text("Enable Neovim shortcuts",Modifier.weight(1f),style=SettingsType.row)
-                Switch(checked=enabled,onCheckedChange=null)
-            }
-            Text("Menu layout",style=SettingsType.section,color=MaterialTheme.colorScheme.primary)
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                NeovimShortcutLayout.entries.forEach {choice->
-                    FilterChip(selected=layout==choice,onClick={onLayout(choice)},
-                        label={Text(if(choice==NeovimShortcutLayout.GRID) "Grid" else "Circular",style=SettingsType.row)})
-                }
-            }
-            if(layout==NeovimShortcutLayout.CIRCULAR) {
-                Text("Opening effect",style=SettingsType.section,color=MaterialTheme.colorScheme.primary)
-                FlowRow(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    NeovimShortcutEffect.entries.forEach {choice->
-                        FilterChip(selected=effect==choice,onClick={onEffect(choice)},label={Text(choice.label,style=SettingsType.row)})
-                    }
-                }
-                Text(when(effect) {
-                    NeovimShortcutEffect.FAN_OUT->"Segments open clockwise in a wave."
-                    NeovimShortcutEffect.SPIN->"The wheel spins into place."
-                    NeovimShortcutEffect.EXPAND->"The wheel grows outward from the center."
-                    NeovimShortcutEffect.NONE->"Opens and closes immediately."
-                },style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth().toggleable(hapticsEnabled,role=Role.Switch,onValueChange=onHaptics).padding(vertical=4.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically) {
-                    Text("Selection haptics",Modifier.weight(1f),style=SettingsType.row)
-                    Switch(checked=hapticsEnabled,onCheckedChange=null)
-                }
-                Text("Hold and slide to a segment; release to run. Swipe up/down on the outer ring for more pages.",style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text("One shortcut per line. Use a name followed by = for a custom label.",style=SettingsType.body)
-            Text("Examples: :w or LazyGit = <Space>lg. Optional [Git] headers group following shortcuts; [] returns to ungrouped shortcuts. One group level only.",style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedTextField(draft,{draft=it;error=null},Modifier.fillMaxWidth(),label={Text("Shortcuts")},minLines=5,maxLines=8,
-                textStyle=SettingsType.body.copy(fontFamily=MonoUi),isError=error!=null,shape=RoundedCornerShape(14.dp))
-            error?.let {Text(it,style=SettingsType.detail,color=MaterialTheme.colorScheme.error)}
-            Text("Shortcuts start in Normal mode. : commands run immediately. Other key sequences are sent as configured; use <CR> for Enter. Also supports <Esc>, <Tab>, arrow keys and <C-x>. Use <Space> for a Space leader. Drag the floating button to move it.",style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-                TextButton(onClick={draft=NeovimShortcuts.editorText(NeovimShortcuts.defaults);error=null}) {Text("Reset defaults")}
-                Button(onClick={error=onSave(draft);if(error==null) onClose()}) {Text("Save")}
-            }
         }
     }
 }

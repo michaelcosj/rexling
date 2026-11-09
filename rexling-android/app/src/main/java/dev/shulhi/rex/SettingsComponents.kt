@@ -2,6 +2,7 @@ package dev.shulhi.rex
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -110,4 +111,47 @@ internal enum class SettingsGlyph { APPEARANCE,FONT,ALERTS,UPLOAD,INFO,SERVER,CO
             }
         }
     }
+}
+
+/** A labelled switch row; the whole row toggles. */
+@Composable internal fun SettingsToggleRow(title: String,checked: Boolean,onChange: (Boolean)->Unit,subtitle: String?=null) {
+    Row(Modifier.fillMaxWidth().toggleable(checked,role=Role.Switch,onValueChange=onChange).padding(horizontal=16.dp,vertical=14.dp),
+        verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
+            Text(title,style=SettingsType.row)
+            subtitle?.let {Text(it,style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+        }
+        Switch(checked=checked,onCheckedChange=null)
+    }
+}
+
+/** A labelled single choice among a few options. */
+@Composable internal fun <T> SettingsChoiceRow(title: String,options: List<T>,selected: T,label: (T)->String,onSelect: (T)->Unit,subtitle: String?=null) {
+    Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+        Text(title,style=SettingsType.row)
+        subtitle?.let {Text(it,style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            options.forEach {option->
+                FilterChip(selected=selected==option,onClick={onSelect(option)},label={Text(label(option),style=SettingsType.row)})
+            }
+        }
+    }
+}
+
+/** A labelled text field; [mono] for key notation and commands. */
+@Composable internal fun SettingsTextField(label: String,value: String,onChange: (String)->Unit,modifier: Modifier=Modifier,
+    mono: Boolean=false,singleLine: Boolean=true,minLines: Int=1,maxLines: Int=if(singleLine) 1 else 10,isError: Boolean=false,supporting: String?=null) {
+    OutlinedTextField(value,onChange,modifier.fillMaxWidth(),label={Text(label)},singleLine=singleLine,minLines=minLines,maxLines=maxLines,
+        textStyle=if(mono) SettingsType.body.copy(fontFamily=MonoUi) else SettingsType.body,isError=isError,shape=RoundedCornerShape(14.dp),
+        supportingText=supporting?.let {{Text(it,style=SettingsType.detail)}})
+}
+
+/** Two choices: a confirming action and Cancel. */
+@Composable internal fun SettingsConfirmDialog(title: String,body: String,confirm: String,onConfirm: ()->Unit,onDismiss: ()->Unit,detail: String?=null) {
+    AlertDialog(onDismissRequest=onDismiss,title={Text(title,style=SettingsType.title)},text={
+        Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text(body,style=SettingsType.body)
+            detail?.let {Text(it,style=SettingsType.body.copy(fontFamily=MonoUi),color=MaterialTheme.colorScheme.primary)}
+        }
+    },confirmButton={TextButton(onClick=onConfirm) {Text(confirm)}},dismissButton={TextButton(onClick=onDismiss) {Text("Cancel")}})
 }

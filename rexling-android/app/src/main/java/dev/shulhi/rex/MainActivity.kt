@@ -127,7 +127,10 @@ private data class TerminalCloseTarget(val session: String,val id: String,val la
     var appearance by remember {mutableStateOf(false)}
     var about by remember {mutableStateOf(false)}
     var preferencesOpen by remember {mutableStateOf(false)}
-    var neovimSettings by remember {mutableStateOf(false)}
+    var shortcutSettings by remember {mutableStateOf(false)}
+    // null when closed; "" for a new profile.
+    var editingProfile by remember {mutableStateOf<String?>(null)}
+    var pendingShortcut by remember {mutableStateOf<Triple<ShortcutProfile,NeovimShortcut,String>?>(null)}
     var alerts by remember {mutableStateOf(false)}
     var closeTarget by remember {mutableStateOf<TerminalCloseTarget?>(null)}
     val fontSize=model.fontSize
@@ -165,7 +168,7 @@ private data class TerminalCloseTarget(val session: String,val id: String,val la
         model.pendingImageTarget=target
         photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
-    SideEffect {model.setPaneObscured(model.activityVisible || picker.isNotEmpty() || preferencesOpen || servers || newSession || appearance || about || neovimSettings || alerts || fontPicker || closeTarget!=null)}
+    SideEffect {model.setPaneObscured(model.activityVisible || picker.isNotEmpty() || preferencesOpen || servers || newSession || appearance || about || shortcutSettings || editingProfile!=null || pendingShortcut!=null || alerts || fontPicker || closeTarget!=null)}
     DisposableEffect(client) {onDispose {model.setPaneObscured(true)}}
     val keyboardVisible=WindowInsets.ime.getBottom(LocalDensity.current)>0
     val blocks=window?.blocks ?: if(state.phase=="preview") listOf(BlockItem("preview","Terminal")) else emptyList()
@@ -257,10 +260,15 @@ private data class TerminalCloseTarget(val session: String,val id: String,val la
                         ConnectionNotice(state.phase,model.networkAvailable,client::retryNow,Modifier.align(Alignment.TopCenter).padding(8.dp))
                         ReadyNotice(state.connectionEpoch,controlled,ready,Modifier.align(Alignment.TopCenter).padding(8.dp))
                         OtherOwnerNotice(chosen,state.otherOwner && !controlled,ready,client.screenDimensions,client::takeControl,Modifier.align(Alignment.TopEnd).padding(10.dp))
-                        if(model.neovimShortcutsEnabled && ready && chosen==liveBlock && chosen !in state.cachedPrograms && state.programs[chosen]?.kind==ProgramKind.NEOVIM && model.neovimShortcuts.isNotEmpty()) {
-                            NeovimShortcutButton(model.neovimShortcuts,keyTarget,controlled,
-                                onChoose={item,target->client.neovimShortcut(item,target)},onCustomize={neovimSettings=true},layout=model.neovimShortcutLayout,effect=model.neovimShortcutEffect,hapticsEnabled=model.neovimShortcutHaptics,
-                                modifier=Modifier.fillMaxSize(),position=model.neovimShortcutPosition,onPosition=model::moveNeovimShortcut,bottomInset=if(blocks.size>1) 64.dp else 10.dp)
+                        val shortcutProfile=if(ready && chosen==liveBlock && chosen !in state.cachedPrograms) ShortcutProfiles.active(model.shortcutProfiles,state.programs[chosen]) else null
+                        if(shortcutProfile!=null) {
+                            NeovimShortcutButton(shortcutProfile.items,keyTarget,controlled,
+                                onChoose={item,target->
+                                    if(item.confirm) pendingShortcut=Triple(shortcutProfile,item,target)
+                                    else client.shortcut(model.shortcutProfiles,shortcutProfile,item,target)
+                                },onCustomize={editingProfile=shortcutProfile.id},layout=model.neovimShortcutLayout,effect=model.neovimShortcutEffect,hapticsEnabled=model.neovimShortcutHaptics,
+                                modifier=Modifier.fillMaxSize(),position=model.neovimShortcutPosition,onPosition=model::moveNeovimShortcut,bottomInset=if(blocks.size>1) 64.dp else 10.dp,
+                                name=shortcutProfile.name)
                         }
                         }
                     } else Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp),contentAlignment=Alignment.Center) {
@@ -298,12 +306,25 @@ if(picker=="sessions") SessionSwitcher(model.sessionTargets,currentSessionKey,mo
     if(model.activityVisible) ActivitySheet(model.activitySources,model::refreshActivity,model::openActivity,onClose={model.showActivity(false)},onSeen=model::markActivitySeen,onMarkAll=model::markAllActivitySeen)
     if(preferencesOpen) PreferencesSheet({preferencesOpen=false;appearance=true},{preferencesOpen=false;fontPicker=true},{preferencesOpen=false;alerts=true},{preferencesOpen=false;about=true},
         onClose={preferencesOpen=false},shortcutGesture=model.shortcutGesture,onShortcutGesture=model::changeShortcutGesture,
-        onNeovim={preferencesOpen=false;neovimSettings=true},arrowJoystickEnabled=model.arrowJoystickEnabled,onArrowJoystick=model::changeArrowJoystick,
+        onShortcuts={preferencesOpen=false;shortcutSettings=true},arrowJoystickEnabled=model.arrowJoystickEnabled,onArrowJoystick=model::changeArrowJoystick,
         codexTitleAttention=model.experimentalCodexAttention,onCodexTitleAttention=model::changeCodexAttention)
-    if(neovimSettings) NeovimShortcutsSheet(model.neovimShortcuts,model::saveNeovimShortcuts,onClose={neovimSettings=false},
-        enabled=model.neovimShortcutsEnabled,onEnabled=model::enableNeovimShortcuts,
+    if(shortcutSettings && editingProfile==null) ShortcutProfilesSheet(model.shortcutProfiles,onEdit={editingProfile=it},onNew={editingProfile=""},
+        onEnabled=model::enableShortcutProfile,onClose={shortcutSettings=false},
         layout=model.neovimShortcutLayout,onLayout=model::changeNeovimShortcutLayout,effect=model.neovimShortcutEffect,onEffect=model::changeNeovimShortcutEffect,
         hapticsEnabled=model.neovimShortcutHaptics,onHaptics=model::changeNeovimShortcutHaptics)
+    editingProfile?.let {id->
+        val profile=model.shortcutProfiles.firstOrNull {it.id==id}
+        // A new profile gets its id once, so a failed save keeps the same draft.
+        val saveId=remember(id) {profile?.id ?: ShortcutProfiles.newId()}
+        key(id) {
+            ShortcutProfileSheet(profile,onSave={name,match,prefix,enter,text->model.saveShortcutProfile(saveId,name,match,prefix,enter,text)},
+                onClose={editingProfile=null},onDelete=profile?.let {{model.deleteShortcutProfile(it.id)}},
+                defaults=when(id) {ShortcutProfiles.NEOVIM->NeovimShortcuts.defaults;ShortcutProfiles.SHELL->ShortcutProfiles.shellDefaults;else->null})
+        }
+    }
+    pendingShortcut?.let {(profile,item,target)->
+        ShortcutConfirmDialog(profile,item,onConfirm={pendingShortcut=null;client.shortcut(model.shortcutProfiles,profile,item,target)},onDismiss={pendingShortcut=null})
+    }
     if(model.images.notice.isNotEmpty()) AlertDialog(onDismissRequest={model.images.notice=""},title={Text("Image upload")},text={Text(model.images.notice)},confirmButton={TextButton(onClick={model.images.notice=""}) {Text("OK")}})
     if(about) AboutSheet {about=false}
     if(alerts) BackgroundAlertsDialog(model) {alerts=false}

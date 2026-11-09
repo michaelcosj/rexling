@@ -3,7 +3,9 @@ package dev.shulhi.rex
 import java.util.Locale
 
 enum class ProgramKind { TERMINAL, CLAUDE, CODEX, NEOVIM, VIM, GIT, PYTHON, NODE, SSH, TMUX, MONITOR, CLOUDFLARE }
-data class ProgramIdentity(val kind: ProgramKind, val label: String, val executable: String="",val pending: Boolean=false) {
+data class ProgramIdentity(val kind: ProgramKind, val label: String, val executable: String="",val pending: Boolean=false,val candidates: List<String> = emptyList()) {
+    /** Names and paths Rex reported for the foreground program; falls back to the resolved name. */
+    internal val matchNames: List<String> get()=candidates.ifEmpty {listOf(executable,label).filter {it.isNotBlank()}.distinct()}
     val title: String get() = when(kind) {
         ProgramKind.CLAUDE -> "claude"; ProgramKind.CODEX -> "codex"; ProgramKind.NEOVIM -> "nvim"
         ProgramKind.VIM -> "vim"; ProgramKind.GIT -> "git"; ProgramKind.PYTHON -> "python"
@@ -26,7 +28,7 @@ data class ProgramIdentity(val kind: ProgramKind, val label: String, val executa
     }
 
     companion object {
-        private val shellNames = setOf("fish", "zsh", "bash", "sh", "dash", "ash", "ksh", "mksh", "tcsh", "csh", "nu", "nushell", "pwsh", "powershell", "cmd")
+        internal val shellNames = setOf("fish", "zsh", "bash", "sh", "dash", "ash", "ksh", "mksh", "tcsh", "csh", "nu", "nushell", "pwsh", "powershell", "cmd")
         private val defaultTitle = Regex("(?:(?:Window|Tab|Block)[ _:-]+[0-9a-f]+(?:-[0-9a-f]+)*|Terminal \\d+|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})", RegexOption.IGNORE_CASE)
         private fun genericTitle(value: String): Boolean = value.isBlank() ||
             value.lowercase(Locale.ROOT) in setOf("shell", "terminal", "window") || defaultTitle.matches(value)
@@ -56,11 +58,11 @@ data class ProgramIdentity(val kind: ProgramKind, val label: String, val executa
                     ProgramKind.PYTHON -> "Python"; ProgramKind.NODE -> "JavaScript runtime"
                     ProgramKind.SSH -> "Remote shell"; ProgramKind.TMUX -> "Terminal multiplexer"
                     ProgramKind.MONITOR -> "System monitor"; ProgramKind.CLOUDFLARE -> "Cloudflare"; ProgramKind.TERMINAL -> "Terminal"
-                },name)
+                },name,candidates=candidates)
             }
             val name = candidates.firstOrNull()?.replace('\\', '/')?.substringAfterLast('/')?.trimStart('-')
                 ?.filterNot { it.isISOControl() || Character.getType(it)==Character.FORMAT.toInt() }?.take(40).orEmpty()
-            return ProgramIdentity(ProgramKind.TERMINAL, name.ifBlank { "Terminal" })
+            return ProgramIdentity(ProgramKind.TERMINAL, name.ifBlank { "Terminal" },candidates=candidates)
         }
     }
 }
