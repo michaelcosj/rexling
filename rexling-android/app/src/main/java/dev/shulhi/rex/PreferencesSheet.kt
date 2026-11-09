@@ -13,71 +13,37 @@ import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable internal fun PreferencesSheet(onAppearance: ()->Unit,onFont: ()->Unit,onAlerts: ()->Unit,onAbout: ()->Unit,onClose: ()->Unit,
-    shortcutGesture: ControlShortcutGesture=ControlShortcutGesture.HOLD,onShortcutGesture: (ControlShortcutGesture)->Unit={},onNeovim: ()->Unit={},
+    shortcutGesture: ControlShortcutGesture=ControlShortcutGesture.HOLD,onShortcutGesture: (ControlShortcutGesture)->Unit={},onShortcuts: ()->Unit={},
     arrowJoystickEnabled: Boolean=true,onArrowJoystick: (Boolean)->Unit={},codexTitleAttention: Boolean=false,onCodexTitleAttention: (Boolean)->Unit={},
     terminalPadding: TerminalPadding=TerminalPadding.NORMAL,onTerminalPadding: (TerminalPadding)->Unit={},extendPadding: Boolean=true,onExtendPadding: (Boolean)->Unit={}) {
-    ModalBottomSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=MaterialTheme.colorScheme.surface) {
-        Column(Modifier.fillMaxWidth().heightIn(max=680.dp).verticalScroll(rememberScrollState()).padding(horizontal=20.dp).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
+    RexSheet(onDismissRequest=onClose) {
+        Column(Modifier.fillMaxWidth().heightIn(max=680.dp).verticalScroll(rememberScrollState()).padding(horizontal=20.dp).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             SettingsHeader("Preferences","Close preferences",onClose)
             SettingsSection("Display") {
                 SettingsRow("Appearance","Themes and light or dark mode",SettingsGlyph.APPEARANCE,onAppearance)
                 SettingsDivider()
                 SettingsRow("Font size","Terminal text size",SettingsGlyph.FONT,onFont)
                 SettingsDivider()
-                Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                    Text("Terminal padding",style=SettingsType.row)
-                    Text("Space around the terminal",style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        TerminalPadding.entries.forEach {option->
-                            FilterChip(selected=terminalPadding==option,onClick={onTerminalPadding(option)},label={Text(option.label,style=SettingsType.row)})
-                        }
-                    }
-                }
+                SettingsChoiceRow("Terminal padding",TerminalPadding.entries,terminalPadding,{it.label},onTerminalPadding,subtitle="Space around the terminal")
                 SettingsDivider()
-                Row(Modifier.fillMaxWidth().toggleable(extendPadding,role=androidx.compose.ui.semantics.Role.Switch,onValueChange=onExtendPadding)
-                    .padding(horizontal=16.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                    Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
-                        Text("Extend colors into padding",style=SettingsType.row)
-                        Text(if(extendPadding) "Edge cell colors fill the padding, like Neovim's background" else "Padding keeps the theme background",style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked=extendPadding,onCheckedChange=null)
-                }
+                SettingsToggleRow("Extend colors into padding",extendPadding,onExtendPadding,
+                    subtitle=if(extendPadding) "Edge cell colors fill the padding, like Neovim's background" else "Padding keeps the theme background")
             }
             SettingsSection("Keyboard") {
-                Row(Modifier.fillMaxWidth().toggleable(arrowJoystickEnabled,role=androidx.compose.ui.semantics.Role.Switch,onValueChange=onArrowJoystick)
-                    .padding(horizontal=16.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                    Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
-                        Text("Use joystick for arrows",style=SettingsType.row)
-                        Text(if(arrowJoystickEnabled) "Hold and slide; double-tap for arrow buttons" else "Tap for arrow buttons",style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked=arrowJoystickEnabled,onCheckedChange=null)
-                }
+                SettingsToggleRow("Use joystick for arrows",arrowJoystickEnabled,onArrowJoystick,
+                    subtitle=if(arrowJoystickEnabled) "Hold and slide; double-tap for arrow buttons" else "Tap for arrow buttons")
                 SettingsDivider()
-                Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                    Text("Ctrl shortcuts",style=SettingsType.row)
-                    Text("Open the ^ shortcut list with",style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        ControlShortcutGesture.entries.forEach {gesture->
-                            FilterChip(selected=shortcutGesture==gesture,onClick={onShortcutGesture(gesture)},
-                                label={Text(if(gesture==ControlShortcutGesture.HOLD) "Hold" else "Double tap",style=SettingsType.row)})
-                        }
-                    }
-                }
+                SettingsChoiceRow("Ctrl shortcuts",ControlShortcutGesture.entries,shortcutGesture,{if(it==ControlShortcutGesture.HOLD) "Hold" else "Double tap"},onShortcutGesture,
+                    subtitle="Open the ^ shortcut list with")
                 SettingsDivider()
-                SettingsRow("Neovim shortcuts","Customize the floating key menu",SettingsGlyph.COMMAND,onNeovim)
+                SettingsRow("Shortcuts","Floating key menus for Neovim, the shell and other programs",SettingsGlyph.COMMAND,onShortcuts)
             }
             SettingsSection("Connections") {
                 SettingsRow("Background alerts","Task completions and attention alerts",SettingsGlyph.ALERTS,onAlerts)
             }
             SettingsSection("Experimental") {
-                Row(Modifier.fillMaxWidth().toggleable(value=codexTitleAttention,role=androidx.compose.ui.semantics.Role.Switch,onValueChange=onCodexTitleAttention)
-                    .padding(horizontal=16.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                    Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
-                        Text("Codex title attention",style=SettingsType.row)
-                        Text("Use Codex’s explicit Action Required title when its status stays Working. Depends on Codex’s title format.",style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked=codexTitleAttention,onCheckedChange=null)
-                }
+                SettingsToggleRow("Codex title attention",codexTitleAttention,onCodexTitleAttention,
+                    subtitle="Use Codex’s explicit Action Required title when its status stays Working. Depends on Codex’s title format.")
             }
             SettingsSection("App") {
                 SettingsRow("About Rexling","Version, build and project information",SettingsGlyph.INFO,onAbout)

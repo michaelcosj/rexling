@@ -109,37 +109,55 @@ class NeovimShortcutUiTest {
         ui.onNodeWithContentDescription("Neovim shortcuts").assertIsNotEnabled()
         ui.runOnIdle {assertEquals(0,sent)}
     }
-    @Test fun editorValidatesAndSavesCustomKeysWithoutAddingEnter() {
-        var saved: List<NeovimShortcut>?=null;var closed=false
-        val enabled=mutableStateOf(true)
+    @Test fun profilesSheetChangesSharedMenuSettingsAndProfileSwitches() {
+        val profiles=mutableStateOf(ShortcutProfiles.defaults())
         val layout=mutableStateOf(NeovimShortcutLayout.GRID)
         val effect=mutableStateOf(NeovimShortcutEffect.FAN_OUT)
         val haptics=mutableStateOf(true)
+        var edited="";var created=false
         ui.setContent {MaterialTheme {Box(Modifier.fillMaxSize()) {
-            NeovimShortcutsSheet(NeovimShortcuts.defaults,{text->runCatching {saved=NeovimShortcuts.parse(text)}.exceptionOrNull()?.message},{closed=true},enabled.value,{enabled.value=it},layout.value,{layout.value=it},effect.value,{effect.value=it},haptics.value,{haptics.value=it})
+            ShortcutProfilesSheet(profiles.value,{edited=it},{created=true},{id,on->profiles.value=profiles.value.map {if(it.id==id) it.copy(enabled=on) else it}},{},
+                layout.value,{layout.value=it},effect.value,{effect.value=it},haptics.value,{haptics.value=it})
         }}}
-        ui.onNodeWithText("Grid").assertIsSelected()
+        ui.onNodeWithText("Neovim").assertIsDisplayed()
+        ui.onNodeWithText("fish, zsh, bash, sh").assertIsDisplayed()
+        ui.onNodeWithContentDescription("Show Neovim shortcuts").assertIsOn().performClick()
+        ui.runOnIdle {assertFalse(profiles.value.first {it.id==ShortcutProfiles.NEOVIM}.enabled)}
+        ui.onNodeWithContentDescription("Edit Shell profile").performClick()
+        ui.runOnIdle {assertEquals(ShortcutProfiles.SHELL,edited)}
+        ui.onNodeWithText("New profile").performScrollTo().performClick()
+        ui.runOnIdle {assertTrue(created)}
+        ui.onNodeWithText("Grid").performScrollTo().assertIsSelected()
         ui.onNodeWithText("Circular").performClick().assertIsSelected()
-        ui.onNodeWithText("Fan out").assertIsSelected()
+        ui.onNodeWithText("Fan out").performScrollTo().assertIsSelected()
         ui.onNodeWithText("Shutter").assertDoesNotExist()
         ui.onNodeWithText("Spin").performScrollTo().performClick().assertIsSelected()
         ui.runOnIdle {assertEquals(NeovimShortcutEffect.SPIN,effect.value)}
-        ui.onNodeWithText("Expand").performScrollTo().performClick().assertIsSelected()
-        ui.runOnIdle {assertEquals(NeovimShortcutEffect.EXPAND,effect.value)}
         ui.onNodeWithText("None").performScrollTo().performClick().assertIsSelected()
         ui.runOnIdle {assertEquals(NeovimShortcutEffect.NONE,effect.value)}
         ui.onNodeWithText("Selection haptics").performScrollTo().assertIsOn().performClick().assertIsOff()
         ui.runOnIdle {assertFalse(haptics.value)}
-        ui.onNodeWithText("Enable Neovim shortcuts").performScrollTo().assertIsOn().performClick().assertIsOff()
-        ui.onNodeWithText("Shortcuts").performTextReplacement("LazyGit = <Leader>lg")
-        ui.onNodeWithText("Shortcuts").assertTextContains("LazyGit = <Leader>lg")
+    }
+    @Test fun editorValidatesAndSavesCustomKeysWithoutAddingEnter() {
+        var saved: ShortcutProfile?=null;var closed=false
+        ui.setContent {MaterialTheme {Box(Modifier.fillMaxSize()) {
+            ShortcutProfileSheet(ShortcutProfiles.neovim(),{name,match,prefix,enter,text->
+                runCatching {saved=ShortcutProfiles.build(ShortcutProfiles.NEOVIM,name,match,prefix,enter,true,text,emptyList())}.exceptionOrNull()?.message
+            },{closed=true},defaults=NeovimShortcuts.defaults)
+        }}}
+        ui.onNodeWithText(": commands").performScrollTo().assertIsSelected()
+        ui.onNodeWithText("Shortcuts").performScrollTo().performTextReplacement("LazyGit = <Leader>lg")
         ui.onNodeWithText("Save").performScrollTo().performClick()
         ui.waitUntil(4000) {ui.onAllNodesWithText("Use your actual leader key, such as <Space>, instead of <Leader>.").fetchSemanticsNodes().isNotEmpty()}
-        ui.onNodeWithText("Use your actual leader key, such as <Space>, instead of <Leader>.").performScrollTo().assertIsDisplayed()
         ui.runOnIdle {assertFalse(closed);assertNull(saved)}
-        ui.onNodeWithText("Shortcuts").performTextReplacement(":w\nLazyGit = <Space>lg")
+        ui.onNodeWithText("Shortcuts").performTextReplacement(":w\nLazyGit = <Space>lg\n!Quit all = :qa!")
         ui.onNodeWithText("Save").performScrollTo().performClick()
-        ui.runOnIdle {assertTrue(closed);assertFalse(enabled.value);assertEquals(NeovimShortcuts.parse(":w\nLazyGit = <Space>lg"),saved)}
+        ui.runOnIdle {
+            assertTrue(closed)
+            assertEquals(NeovimShortcuts.parse(":w\nLazyGit = <Space>lg\n!Quit all = :qa!"),saved?.items)
+            assertTrue(saved!!.items.last().confirm)
+            assertEquals(listOf("nvim","neovim"),saved!!.match)
+        }
     }
     @Test fun draggingMovesTheButtonWithoutOpeningTheMenuAndStaysInsideAResizedTerminal()=checkClosedDragging(NeovimShortcutLayout.GRID)
     @Test fun closedWheelCanStillBeDraggedWithoutOpeningOrSending()=checkClosedDragging(NeovimShortcutLayout.CIRCULAR)

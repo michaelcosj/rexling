@@ -150,11 +150,21 @@ class RexModel @JvmOverloads constructor(application: Application, preferenceNam
     internal var neovimShortcutHaptics by mutableStateOf(preferences.getBoolean("neovim_shortcut_haptics",true))
         private set
     internal fun changeNeovimShortcutHaptics(value: Boolean) {neovimShortcutHaptics=value;preferences.edit {putBoolean("neovim_shortcut_haptics",value)}}
-    internal var neovimShortcuts by mutableStateOf(NeovimShortcuts.decode(preferences.getString("neovim_shortcuts",null)))
+    /** Saved profiles; the first launch moves the earlier Neovim-only list and switch into the Neovim profile. */
+    internal var shortcutProfiles by mutableStateOf(ShortcutProfiles.decode(preferences.getString("shortcut_profiles",null)) {
+        ShortcutProfiles.defaults(NeovimShortcuts.decode(preferences.getString("neovim_shortcuts",null)),preferences.getBoolean("neovim_shortcuts_enabled",true))
+    })
         private set
-    internal var neovimShortcutsEnabled by mutableStateOf(preferences.getBoolean("neovim_shortcuts_enabled",true))
-        private set
-    internal fun enableNeovimShortcuts(value: Boolean) {neovimShortcutsEnabled=value;preferences.edit {putBoolean("neovim_shortcuts_enabled",value)}}
+    private fun storeProfiles(value: List<ShortcutProfile>) {shortcutProfiles=value;preferences.edit {putString("shortcut_profiles",ShortcutProfiles.encode(value))}}
+    internal fun enableShortcutProfile(id: String,value: Boolean) {storeProfiles(shortcutProfiles.map {if(it.id==id) it.copy(enabled=value) else it})}
+    internal fun deleteShortcutProfile(id: String) {storeProfiles(shortcutProfiles.filterNot {it.id==id})}
+    /** Saves a new or edited profile; returns a message for the user when it is invalid. */
+    internal fun saveShortcutProfile(id: String,name: String,match: String,prefix: String,enter: ShortcutEnter,shortcuts: String): String? = runCatching {
+        val existing=shortcutProfiles.firstOrNull {it.id==id}
+        require(existing!=null || ShortcutProfiles.canAdd(shortcutProfiles)) {"You can keep at most 32 profiles."}
+        val profile=ShortcutProfiles.build(id,name,match,prefix,enter,existing?.enabled ?: true,shortcuts,shortcutProfiles)
+        storeProfiles(if(existing==null) shortcutProfiles+profile else shortcutProfiles.map {if(it.id==id) profile else it})
+    }.exceptionOrNull()?.message
     internal var neovimShortcutPosition by mutableStateOf(androidx.compose.ui.geometry.Offset(
         preferences.getFloat("neovim_shortcut_x",0f).takeIf {it.isFinite()}?.coerceIn(0f,1f) ?: 0f,
         preferences.getFloat("neovim_shortcut_y",1f).takeIf {it.isFinite()}?.coerceIn(0f,1f) ?: 1f))
@@ -164,10 +174,6 @@ class RexModel @JvmOverloads constructor(application: Application, preferenceNam
         neovimShortcutPosition=androidx.compose.ui.geometry.Offset(value.x.coerceIn(0f,1f),value.y.coerceIn(0f,1f))
         preferences.edit {putFloat("neovim_shortcut_x",neovimShortcutPosition.x);putFloat("neovim_shortcut_y",neovimShortcutPosition.y)}
     }
-    internal fun saveNeovimShortcuts(text: String): String? = runCatching {
-        val items=NeovimShortcuts.parse(text)
-        neovimShortcuts=items;preferences.edit {putString("neovim_shortcuts",NeovimShortcuts.encode(items))}
-    }.exceptionOrNull()?.message
     var servers by mutableStateOf(SavedServers.decode(preferences.getString("servers",null),preferences.getString("endpoint","").orEmpty()))
         private set
     var activeServerId by mutableStateOf(preferences.getString("active_server",null)?.takeIf {id->servers.any {it.id==id}} ?: servers.firstOrNull()?.id.orEmpty())

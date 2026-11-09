@@ -61,7 +61,7 @@ import kotlinx.coroutines.launch
         val program=programs[block?.id] ?: ProgramIdentity.Loading
         return program.tabTitle(tab.label,block?.label.orEmpty(),windows.indexOf(tab)+1,titles[block?.id].orEmpty())
     }
-    ModalBottomSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=MaterialTheme.colorScheme.surface,
+    RexSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=MaterialTheme.colorScheme.surface,
         dragHandle={Box(Modifier.fillMaxWidth().height(16.dp),contentAlignment=Alignment.Center) {
             Box(Modifier.width(28.dp).height(3.dp).background(MaterialTheme.colorScheme.outlineVariant,RoundedCornerShape(3.dp)))
         }}) {

@@ -12,7 +12,8 @@ internal enum class NeovimShortcutEffect(val label: String,val openMillis: Int,v
     }
 }
 
-internal data class NeovimShortcut(val label: String,val keys: String,val group: String="")
+/** [confirm] asks before sending; written as a leading `!` in the editor. */
+internal data class NeovimShortcut(val label: String,val keys: String,val group: String="",val confirm: Boolean=false)
 internal sealed interface NeovimShortcutEntry {
     val label: String
     data class Action(val shortcut: NeovimShortcut): NeovimShortcutEntry {override val label get()=shortcut.label}
@@ -25,7 +26,8 @@ internal object NeovimShortcuts {
         var group=""
         items.forEach {item->
             if(item.group!=group) {add("[${item.group}]");group=item.group}
-            add(if(item.label==item.keys && !(item.keys.startsWith("[") && item.keys.endsWith("]"))) item.keys else "${item.label} = ${item.keys}")
+            val line=if(item.label==item.keys && !(item.keys.startsWith("[") && item.keys.endsWith("]")) && !item.keys.startsWith("!")) item.keys else "${item.label} = ${item.keys}"
+            add(if(item.confirm) "!$line" else line)
         }
     }.joinToString("\n")
     fun entries(items: List<NeovimShortcut>,group: String=""): List<NeovimShortcutEntry> {
@@ -48,14 +50,17 @@ internal object NeovimShortcuts {
                 if(group.isNotEmpty()) groups.add(group)
                 return@forEach
             }
-            val split=line.indexOf(" = ")
-            val label=(if(split<0) line else line.take(split)).trim()
-            val keys=(if(split<0) line else line.substring(split+3)).trim()
+            // A leading ! asks before sending. Use Name = !keys to send a literal !.
+            val confirm=line.length>1 && line.startsWith("!")
+            val body=if(confirm) line.drop(1).trimStart() else line
+            val split=body.indexOf(" = ")
+            val label=(if(split<0) body else body.take(split)).trim()
+            val keys=(if(split<0) body else body.substring(split+3)).trim()
             require(label.isNotEmpty() && label.length<=40) {"Use a name of 1–40 characters. For longer keys, use Name = keys."}
             require(keys.isNotEmpty() && keys.length<=256) {"Use 1–256 characters for each key sequence."}
             require((label+keys).none {it.isISOControl() || Character.getType(it)==Character.FORMAT.toInt()}) {"Use key notation such as <CR> instead of control characters."}
             decodeKeys(keys)
-            items.add(NeovimShortcut(label,keys,group))
+            items.add(NeovimShortcut(label,keys,group,confirm))
         }
         require(items.map {it.group to it.label}.distinct().size==items.size) {"Give shortcuts in the same group different names."}
         val populatedGroups=items.mapTo(mutableSetOf()) {it.group}
@@ -89,24 +94,14 @@ internal object NeovimShortcuts {
             append(value);i=end+1
         }
     }
-    fun encode(items: List<NeovimShortcut>)=JSONArray().apply {items.forEach {item->put(JSONObject().put("label",item.label).put("keys",item.keys).apply {if(item.group.isNotEmpty()) put("group",item.group)})}}.toString()
+    fun encode(items: List<NeovimShortcut>)=JSONArray().apply {items.forEach {item->put(JSONObject().put("label",item.label).put("keys",item.keys).apply {if(item.group.isNotEmpty()) put("group",item.group);if(item.confirm) put("confirm",true)})}}.toString()
     fun decode(text: String?): List<NeovimShortcut> = if(text==null) defaults else runCatching {
         val array=JSONArray(text)
-        val items=(0 until array.length()).map {i->array.getJSONObject(i).let {NeovimShortcut(it.getString("label"),it.getString("keys"),it.optString("group"))}}
+        val items=(0 until array.length()).map {i->array.getJSONObject(i).let {NeovimShortcut(it.getString("label"),it.getString("keys"),it.optString("group"),it.optBoolean("confirm"))}}
         parse(editorText(items)).also {require(it==items)}
     }.getOrDefault(defaults)
 
     /** Use live identity and a captured input target, never a cached icon or a replacement pane. */
-    fun input(state: AppState,item: NeovimShortcut,target: String,currentTarget: String,active: Boolean,pending: Boolean): String? {
-        if(!active || pending || target!=currentTarget || !state.connected || !state.controlled || state.creating || state.screen==null ||
-            state.selectedBlock.isBlank() || state.selectedBlock in state.cachedPrograms || state.programs[state.selectedBlock]?.kind!=ProgramKind.NEOVIM) return null
-        return runCatching {
-            require(parse(editorText(listOf(item))).single()==item)
-            val keys=decodeKeys(item.keys)
-            // Submit plain Ex commands, while preserving explicitly encoded key sequences.
-            val body=keys.trimStart('\u001b')
-            val enter=body.startsWith(":") && body.none {it=='\r' || it=='\n' || it=='\u001b'}
-            "\u001c\u000e$keys"+if(enter) "\r" else ""
-        }.getOrNull()
-    }
+    fun input(state: AppState,item: NeovimShortcut,target: String,currentTarget: String,active: Boolean,pending: Boolean): String? =
+        ShortcutProfiles.input(state,ShortcutProfiles.neovim(listOf(item)),item,target,currentTarget,active,pending)
 }

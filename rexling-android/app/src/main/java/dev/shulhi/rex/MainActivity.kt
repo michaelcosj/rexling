@@ -95,7 +95,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun RexApp(model: RexModel) {
     val client=model.activeClient
     key(model.activeServerId) {RexWorkspace(model,client)}
-    if(model.notificationNotice.isNotBlank()) AlertDialog(onDismissRequest={model.notificationNotice=""},title={Text("Notification")},text={Text(model.notificationNotice)},confirmButton={TextButton(onClick={model.notificationNotice=""}) {Text("OK")}})
+    if(model.notificationNotice.isNotBlank()) RexAlertDialog(onDismissRequest={model.notificationNotice=""},title={Text("Notification")},text={Text(model.notificationNotice)},confirmButton={TextButton(onClick={model.notificationNotice=""}) {Text("OK")}})
 }
 
 private data class TerminalCloseTarget(val session: String,val id: String,val label: String,val tab: Boolean,val blocks: List<String>)
@@ -127,7 +127,10 @@ private data class TerminalCloseTarget(val session: String,val id: String,val la
     var appearance by remember {mutableStateOf(false)}
     var about by remember {mutableStateOf(false)}
     var preferencesOpen by remember {mutableStateOf(false)}
-    var neovimSettings by remember {mutableStateOf(false)}
+    var shortcutSettings by remember {mutableStateOf(false)}
+    // null when closed; "" for a new profile.
+    var editingProfile by remember {mutableStateOf<String?>(null)}
+    var pendingShortcut by remember {mutableStateOf<Triple<ShortcutProfile,NeovimShortcut,String>?>(null)}
     var alerts by remember {mutableStateOf(false)}
     var closeTarget by remember {mutableStateOf<TerminalCloseTarget?>(null)}
     val fontSize=model.fontSize
@@ -165,7 +168,7 @@ private data class TerminalCloseTarget(val session: String,val id: String,val la
         model.pendingImageTarget=target
         photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
-    SideEffect {model.setPaneObscured(model.activityVisible || picker.isNotEmpty() || preferencesOpen || servers || newSession || appearance || about || neovimSettings || alerts || fontPicker || closeTarget!=null)}
+    SideEffect {model.setPaneObscured(model.activityVisible || picker.isNotEmpty() || preferencesOpen || servers || newSession || appearance || about || shortcutSettings || editingProfile!=null || pendingShortcut!=null || alerts || fontPicker || closeTarget!=null)}
     DisposableEffect(client) {onDispose {model.setPaneObscured(true)}}
     val keyboardVisible=WindowInsets.ime.getBottom(LocalDensity.current)>0
     val blocks=window?.blocks ?: if(state.phase=="preview") listOf(BlockItem("preview","Terminal")) else emptyList()
@@ -257,10 +260,15 @@ private data class TerminalCloseTarget(val session: String,val id: String,val la
                         ConnectionNotice(state.phase,model.networkAvailable,client::retryNow,Modifier.align(Alignment.TopCenter).padding(8.dp))
                         ReadyNotice(state.connectionEpoch,controlled,ready,Modifier.align(Alignment.TopCenter).padding(8.dp))
                         OtherOwnerNotice(chosen,state.otherOwner && !controlled,ready,client.screenDimensions,client::takeControl,Modifier.align(Alignment.TopEnd).padding(10.dp))
-                        if(model.neovimShortcutsEnabled && ready && chosen==liveBlock && chosen !in state.cachedPrograms && state.programs[chosen]?.kind==ProgramKind.NEOVIM && model.neovimShortcuts.isNotEmpty()) {
-                            NeovimShortcutButton(model.neovimShortcuts,keyTarget,controlled,
-                                onChoose={item,target->client.neovimShortcut(item,target)},onCustomize={neovimSettings=true},layout=model.neovimShortcutLayout,effect=model.neovimShortcutEffect,hapticsEnabled=model.neovimShortcutHaptics,
-                                modifier=Modifier.fillMaxSize(),position=model.neovimShortcutPosition,onPosition=model::moveNeovimShortcut,bottomInset=if(blocks.size>1) 64.dp else 10.dp)
+                        val shortcutProfile=if(ready && chosen==liveBlock && chosen !in state.cachedPrograms) ShortcutProfiles.active(model.shortcutProfiles,state.programs[chosen]) else null
+                        if(shortcutProfile!=null) {
+                            NeovimShortcutButton(shortcutProfile.items,keyTarget,controlled,
+                                onChoose={item,target->
+                                    if(item.confirm) pendingShortcut=Triple(shortcutProfile,item,target)
+                                    else client.shortcut(model.shortcutProfiles,shortcutProfile,item,target)
+                                },onCustomize={editingProfile=shortcutProfile.id},layout=model.neovimShortcutLayout,effect=model.neovimShortcutEffect,hapticsEnabled=model.neovimShortcutHaptics,
+                                modifier=Modifier.fillMaxSize(),position=model.neovimShortcutPosition,onPosition=model::moveNeovimShortcut,bottomInset=if(blocks.size>1) 64.dp else 10.dp,
+                                name=shortcutProfile.name)
                         }
                         }
                     } else Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp),contentAlignment=Alignment.Center) {
@@ -298,14 +306,27 @@ if(picker=="sessions") SessionSwitcher(model.sessionTargets,currentSessionKey,mo
     if(model.activityVisible) ActivitySheet(model.activitySources,model::refreshActivity,model::openActivity,onClose={model.showActivity(false)},onSeen=model::markActivitySeen,onMarkAll=model::markAllActivitySeen)
     if(preferencesOpen) PreferencesSheet({preferencesOpen=false;appearance=true},{preferencesOpen=false;fontPicker=true},{preferencesOpen=false;alerts=true},{preferencesOpen=false;about=true},
         onClose={preferencesOpen=false},shortcutGesture=model.shortcutGesture,onShortcutGesture=model::changeShortcutGesture,
-        onNeovim={preferencesOpen=false;neovimSettings=true},arrowJoystickEnabled=model.arrowJoystickEnabled,onArrowJoystick=model::changeArrowJoystick,
+        onShortcuts={preferencesOpen=false;shortcutSettings=true},arrowJoystickEnabled=model.arrowJoystickEnabled,onArrowJoystick=model::changeArrowJoystick,
         codexTitleAttention=model.experimentalCodexAttention,onCodexTitleAttention=model::changeCodexAttention,
         terminalPadding=model.terminalPadding,onTerminalPadding=model::changeTerminalPadding,extendPadding=model.extendPadding,onExtendPadding=model::changeExtendPadding)
-    if(neovimSettings) NeovimShortcutsSheet(model.neovimShortcuts,model::saveNeovimShortcuts,onClose={neovimSettings=false},
-        enabled=model.neovimShortcutsEnabled,onEnabled=model::enableNeovimShortcuts,
+    if(shortcutSettings && editingProfile==null) ShortcutProfilesSheet(model.shortcutProfiles,onEdit={editingProfile=it},onNew={editingProfile=""},
+        onEnabled=model::enableShortcutProfile,onClose={shortcutSettings=false},
         layout=model.neovimShortcutLayout,onLayout=model::changeNeovimShortcutLayout,effect=model.neovimShortcutEffect,onEffect=model::changeNeovimShortcutEffect,
         hapticsEnabled=model.neovimShortcutHaptics,onHaptics=model::changeNeovimShortcutHaptics)
-    if(model.images.notice.isNotEmpty()) AlertDialog(onDismissRequest={model.images.notice=""},title={Text("Image upload")},text={Text(model.images.notice)},confirmButton={TextButton(onClick={model.images.notice=""}) {Text("OK")}})
+    editingProfile?.let {id->
+        val profile=model.shortcutProfiles.firstOrNull {it.id==id}
+        // A new profile gets its id once, so a failed save keeps the same draft.
+        val saveId=remember(id) {profile?.id ?: ShortcutProfiles.newId()}
+        key(id) {
+            ShortcutProfileSheet(profile,onSave={name,match,prefix,enter,text->model.saveShortcutProfile(saveId,name,match,prefix,enter,text)},
+                onClose={editingProfile=null},onDelete=profile?.let {{model.deleteShortcutProfile(it.id)}},
+                defaults=when(id) {ShortcutProfiles.NEOVIM->NeovimShortcuts.defaults;ShortcutProfiles.SHELL->ShortcutProfiles.shellDefaults;else->null})
+        }
+    }
+    pendingShortcut?.let {(profile,item,target)->
+        ShortcutConfirmDialog(profile,item,onConfirm={pendingShortcut=null;client.shortcut(model.shortcutProfiles,profile,item,target)},onDismiss={pendingShortcut=null})
+    }
+    if(model.images.notice.isNotEmpty()) RexAlertDialog(onDismissRequest={model.images.notice=""},title={Text("Image upload")},text={Text(model.images.notice)},confirmButton={TextButton(onClick={model.images.notice=""}) {Text("OK")}})
     if(about) AboutSheet {about=false}
     if(alerts) BackgroundAlertsDialog(model) {alerts=false}
     if(servers) ServersSheet(model){servers=false}
@@ -317,7 +338,7 @@ if(picker=="sessions") SessionSwitcher(model.sessionTargets,currentSessionKey,mo
         onCloseTab={picker="";closeTarget=closeTabTarget(it)},onClosePane={picker="";closeTarget=closePaneTarget(it)},
         onClose={picker=""},initialPage=if(picker=="panes") 1 else 0,onMoveTab=client::moveTab,onMovePane=client::movePane,reorderKey=currentSessionKey)
     closeTarget?.let {target->
-        AlertDialog(onDismissRequest={closeTarget=null},title={Text(if(target.tab) "Close tab?" else "Close pane?")},
+        RexAlertDialog(onDismissRequest={closeTarget=null},title={Text(if(target.tab) "Close tab?" else "Close pane?")},
             text={Text(if(target.tab) "Close “${target.label}”? This ends every program in its ${target.blocks.size} pane${if(target.blocks.size==1) "" else "s"}."
                 else "Close “${target.label}”? This ends the program running in this pane.")},
             confirmButton={TextButton(enabled=ready,onClick={closeTarget=null
@@ -327,7 +348,7 @@ if(picker=="sessions") SessionSwitcher(model.sessionTargets,currentSessionKey,mo
     }
     if(appearance) AppearanceSheet(model.appearance,model.themes,model.theme(false),model.theme(true),model::changeAppearance,model::chooseTheme) {appearance=false}
     if(fontPicker) FontSizeDialog(fontSize,model::changeFontSize) {fontPicker=false}
-    if(newSession) AlertDialog(onDismissRequest={newSession=false},title={Text("New session")},text={
+    if(newSession) RexAlertDialog(onDismissRequest={newSession=false},title={Text("New session")},text={
         OutlinedTextField(newName,{newName=it},singleLine=true,label={Text("Name (optional)")},supportingText={Text("Leave blank for a name from Rex.")})
     },confirmButton={Button(onClick={newSession=false;client.createSession(newName);newName=""},enabled=state.connected&&!state.creating){Text("Create")}},
         dismissButton={TextButton(onClick={newSession=false}){Text("Cancel")}})
@@ -343,7 +364,7 @@ private fun getClipboard(context: Context)=context.getSystemService(Context.CLIP
     // Filtering does not resize the drawer or move the search field under the finger.
     val panelHeight=(128+targets.size.coerceIn(1,7)*64+targets.map {it.server.id}.distinct().size.coerceAtMost(5)*24).dp.coerceIn(248.dp,600.dp)
     val scheme=MaterialTheme.colorScheme
-    ModalBottomSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=scheme.surface,
+    RexSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=scheme.surface,
         dragHandle={Box(Modifier.fillMaxWidth().height(16.dp),contentAlignment=Alignment.Center) {
             Box(Modifier.width(28.dp).height(3.dp).background(scheme.outlineVariant,RoundedCornerShape(3.dp)))
         }}) {
@@ -386,7 +407,7 @@ private fun getClipboard(context: Context)=context.getSystemService(Context.CLIP
         SessionRenameDialog(target,closing.isBlank(),onSave={label->if(onRenameSession(target,label)) renameTarget=null},onDismiss={renameTarget=null})
     }
     closeTarget?.let {target->
-        AlertDialog(onDismissRequest={closeTarget=null},title={Text("Close session?")},
+        RexAlertDialog(onDismissRequest={closeTarget=null},title={Text("Close session?")},
             text={Text("Close “${target.session.label}” on ${target.server.label}? All its tabs and panes will close, ending the programs running in them.")},
             confirmButton={TextButton(onClick={closeTarget=null;onCloseSession(target)},enabled=closing.isBlank()) {
                 Text("Close session",color=MaterialTheme.colorScheme.error)
@@ -413,7 +434,7 @@ private fun getClipboard(context: Context)=context.getSystemService(Context.CLIP
     val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {granted->
         if(granted) {model.setBackgroundAlerts(true);denied=false} else denied=true
     }
-    AlertDialog(onDismissRequest=onClose,title={Text("Background alerts",style=SettingsType.title)},text={
+    RexAlertDialog(onDismissRequest=onClose,title={Text("Background alerts",style=SettingsType.title)},text={
         Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Get notified when a task finishes, needs input, approval, sign-in, or fails while Rexling is in the background or your phone is locked.",style=SettingsType.body)
             Text("A quiet monitoring notification stays visible. Stop it there, or turn this off. Closing Rexling stops monitoring.",style=SettingsType.body)

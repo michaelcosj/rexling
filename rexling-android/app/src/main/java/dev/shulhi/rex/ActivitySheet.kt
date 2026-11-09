@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.dp
         (112+count.coerceIn(1,7)*72+groups.coerceAtMost(5)*24+sources.count {it.error.isNotBlank() || it.partial}*32).dp.coerceIn(208.dp,620.dp)
     }
     val scheme=MaterialTheme.colorScheme
-    ModalBottomSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=scheme.surface,
+    RexSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=scheme.surface,
         dragHandle={Box(Modifier.fillMaxWidth().height(16.dp),contentAlignment=Alignment.Center) {
             Box(Modifier.width(28.dp).height(3.dp).background(scheme.outlineVariant,RoundedCornerShape(3.dp)))
         }}) {
