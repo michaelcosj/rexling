@@ -6,3 +6,5 @@ pub mod snapshot;
 pub mod transport;
 
 pub mod upload;
+
+pub mod graphics;

@@ -11,21 +11,20 @@ internal class TerminalUpdates {
         require(bytes.size in 17..134217728) {"Invalid terminal packet size"}
         val data=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         val version=data.int
-        require(version==0x31545852 || version==0x32545852 || version==0x33545852) {"Unsupported terminal packet"}
+        require(version==0x31545852 || version==0x32545852 || version==0x33545852 || version==0x34545852) {"Unsupported terminal packet"}
         val nextRevision=data.long;require(nextRevision>revision)
         fun text(): String {val n=data.int;require(n>=0 && n<=data.remaining());val raw=ByteArray(n);data.get(raw);return raw.toString(Charsets.UTF_8)}
         val metadata=text()
         var next=if(metadata.isNotEmpty()) AppState.parse(metadata,state.activity) else state.copy(previewFrames=emptyMap())
-        val frame=when(val flag=data.get().toInt()) {
-            0->state.screen
+        fun readFrame(previous: TerminalScreen?): TerminalScreen? = when(val flag=data.get().toInt()) {
+            0->previous
             1->null
             2,3->{
                 val columns=data.short.toInt() and 0xffff;val rows=data.short.toInt() and 0xffff
                 require(columns>0 && rows>0 && columns.toLong()*rows<=2_000_000)
                 val x=data.int;val y=data.int;val fg=data.int;val bg=data.int
                 val scroll=TerminalScroll(data.long,data.long,data.long)
-                val inputFlags=if(version==0x32545852 || version==0x33545852) data.get().toInt() and 0xff else 0
-                val previous=state.screen
+                val inputFlags=if(version>=0x32545852) data.get().toInt() and 0xff else 0
                 if(flag==2) require(previous!=null && previous.columns==columns && previous.rows==rows) {"Missing terminal delta base"}
                 val lines=if(flag==2) previous!!.lines.toMutableList() else MutableList<List<TerminalCell>>(rows){emptyList()}
                 val changed=data.short.toInt() and 0xffff;require(changed<=rows)
@@ -39,7 +38,7 @@ internal class TerminalUpdates {
                         require(col<columns && width<=2)
                         TerminalCell(col,row,text(),foreground,background,attrs,width)
                     }
-                    lines[row]=if(version==0x33545852) {
+                    lines[row]=if(version>=0x33545852) {
                         val n=data.short.toInt() and 0xffff;require(n<=columns)
                         var end=0
                         val links=List(n) {
@@ -57,9 +56,43 @@ internal class TerminalUpdates {
                     } else cells
                 }
                 if(flag==3) require(changed==rows)
-                TerminalScreen(columns,rows,x.takeIf {it>=0},y.takeIf {it>=0},fg,bg,lines.flatten(),scroll,lines,inputFlags)
+                var cw=8;var ch=16;var placements=emptyList<TerminalImagePlacement>()
+                if(version==0x34545852) {
+                    cw=data.int;ch=data.int;require(cw>0 && ch>0)
+                    val images=if(flag==2) previous!!.images.associate {Pair(it.image.id,it.image.generation) to it.image}.toMutableMap() else mutableMapOf()
+                    val assets=data.short.toInt() and 0xffff;require(assets<=4096)
+                    val newKeys=HashSet<Pair<Long,Long>>()
+                    var total=0L
+                    repeat(assets) {
+                        val id=data.int.toLong() and 0xffffffffL;val generation=data.long
+                        val w=data.int;val h=data.int;val n=data.int
+                        require(w in 1..8192 && h in 1..8192 && n.toLong()==w.toLong()*h*4 && n<=data.remaining())
+                        total+=n;require(total<=64*1024*1024)
+                        val key=Pair(id,generation);require(newKeys.add(key))
+                        val bytes=ByteArray(n);data.get(bytes);images[key]=TerminalImage(id,generation,w,h,bytes)
+                    }
+                    val count=data.short.toInt() and 0xffff;require(count<=4096)
+                    placements=List(count) {
+                        val id=data.int.toLong() and 0xffffffffL;val generation=data.long
+                        val image=images[Pair(id,generation)] ?: error("Missing terminal image pixels")
+                        val layer=data.get().toInt() and 0xff;val z=data.int;val col=data.int;val row=data.int
+                        val ox=data.int;val oy=data.int;val w=data.int;val h=data.int
+                        val sx=data.int;val sy=data.int;val sw=data.int;val sh=data.int
+                        require(layer in 0..2 && ox>=0 && oy>=0 && w>0 && h>0 && sx>=0 && sy>=0 && sw>0 && sh>0)
+                        require(sx.toLong()+sw<=image.width && sy.toLong()+sh<=image.height)
+                        TerminalImagePlacement(image,layer,z,col,row,ox,oy,w,h,sx,sy,sw,sh)
+                    }.sortedWith(compareBy({it.layer},{it.z}))
+                }
+                TerminalScreen(columns,rows,x.takeIf {it>=0},y.takeIf {it>=0},fg,bg,lines.flatten(),scroll,lines,inputFlags,placements,cw,ch)
             }
             else->error("Invalid terminal frame flag $flag")
+        }
+        val frame=readFrame(state.screen)
+        if(version==0x34545852) {
+            val count=data.short.toInt() and 0xffff;require(count<=32)
+            val previews=mutableMapOf<String,TerminalScreen>()
+            repeat(count) {val id=text();require(id.isNotEmpty() && !previews.containsKey(id));previews[id]=readFrame(null) ?: error("Missing preview frame")}
+            next=next.copy(previewFrames=previews)
         }
         require(!data.hasRemaining()) {"Trailing terminal packet data"}
         next=next.copy(revision=nextRevision,screen=frame)

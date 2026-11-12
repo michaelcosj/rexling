@@ -56,6 +56,20 @@ class KeyboardBarTest {
             }
         }
     }
+    @Test fun holdingKeyboardPastesOnceWithoutTogglingAndTapStillToggles() {
+        var pasted=0;var toggles=0
+        val controlled=mutableStateOf(true)
+        ui.setContent {MaterialTheme {
+            KeyboardBar(controlled.value,true,false,false,false,false,{},{},{},{},{},{},onPaste={pasted++},onKeyboard={toggles++})
+        }}
+        ui.onNodeWithContentDescription("Show keyboard").performTouchInput {longClick()}
+        ui.runOnIdle {assertEquals(1,pasted);assertEquals(0,toggles)}
+        ui.onNodeWithContentDescription("Show keyboard").performClick()
+        ui.runOnIdle {assertEquals(1,toggles);controlled.value=false}
+        ui.onNodeWithContentDescription("Take control and show keyboard").assert(SemanticsMatcher("no paste while viewing") {
+            !it.config.contains(androidx.compose.ui.semantics.SemanticsActions.OnLongClick)
+        })
+    }
     @Test fun shiftTapAppliesToOneArrowAndShiftTab() {
         keyboard()
         ui.onNodeWithContentDescription("Shift").performTouchInput {click()}

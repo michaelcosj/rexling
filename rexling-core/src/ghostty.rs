@@ -56,7 +56,7 @@ unsafe extern "C" {
         userdata: *mut c_void,
     ) -> i32;
 }
-fn check(code: i32, action: &str) -> Result<()> {
+pub(crate) fn check(code: i32, action: &str) -> Result<()> {
     ensure!(code == 0, "libghostty {action} failed (result {code})");
     Ok(())
 }
@@ -86,6 +86,8 @@ pub struct Frame {
     pub scroll_offset: u64,
     pub scroll_visible: u64,
     pub input_flags: u8,
+    pub next_image_delay_ms:Option<u64>,
+    pub image_cell_width:u32,pub image_cell_height:u32,pub images:Vec<crate::graphics::Placement>,
 }
 impl Frame {
     pub fn text(&self) -> String {
@@ -154,6 +156,8 @@ impl Frame {
 pub struct Terminal {
     handle: NonNull<c_void>,
     _owner_thread: PhantomData<Rc<()>>,
+    images:crate::graphics::Images,
+    graphics_clock:std::time::Instant,
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
@@ -168,14 +172,16 @@ impl Terminal {
             columns > 0 && rows > 0,
             "terminal dimensions must be positive"
         );
+        crate::graphics::init()?;
         let mut handle = ptr::null_mut();
         check(unsafe { rp_new(columns, rows, &mut handle) }, "create")?;
         Ok(Self {
             handle: NonNull::new(handle).context("null terminal")?,
-            _owner_thread: PhantomData,
+            _owner_thread: PhantomData,images:Default::default(),graphics_clock:std::time::Instant::now(),
         })
     }
     pub fn decode(bytes: &[u8]) -> Result<(Self, usize)> {
+        crate::graphics::init()?;
         let mut handle = ptr::null_mut();
         let mut offset = 0;
         check(
@@ -185,7 +191,7 @@ impl Terminal {
         Ok((
             Self {
                 handle: NonNull::new(handle).context("null decoded terminal")?,
-                _owner_thread: PhantomData,
+                _owner_thread: PhantomData,images:Default::default(),graphics_clock:std::time::Instant::now(),
             },
             offset,
         ))
@@ -282,6 +288,10 @@ impl Terminal {
         unsafe { rp_scroll(self.handle.as_ptr(), 0, 1) };
     }
     pub fn frame(&mut self) -> Result<Frame> {
+        self.frame_at(self.graphics_clock.elapsed().as_millis() as u64)
+    }
+    pub(crate) fn frame_at(&mut self,now:u64) -> Result<Frame> {
+        let next_image_delay_ms=crate::graphics::animation_delay(self.handle.as_ptr(),now)?;
         unsafe extern "C" fn cell(
             userdata: *mut c_void,
             x: u16,
@@ -300,6 +310,7 @@ impl Terminal {
             } else {
                 unsafe { std::slice::from_raw_parts(points, len) }
             };
+            let points=if points.first()==Some(&0x10eeee) {&[][..]} else {points};
             let text = points
                 .iter()
                 .map(|p| char::from_u32(*p).unwrap_or('\u{fffd}'))
@@ -334,6 +345,8 @@ impl Terminal {
             },
             "render state",
         )?;
+        let (image_cell_width,image_cell_height,images)=self.images.frame(self.handle.as_ptr())?;
+        let next_image_delay_ms=next_image_delay_ms.filter(|_|!images.is_empty());
         Ok(Frame {
             columns: raw.columns,
             rows: raw.rows,
@@ -345,7 +358,7 @@ impl Terminal {
             scroll_offset: raw.scroll_offset,
             scroll_visible: raw.scroll_visible,
             input_flags: raw.input_flags,
-            cells,
+            cells,image_cell_width,image_cell_height,images,next_image_delay_ms,
         })
     }
     fn theme(&mut self, event: &Value) -> Result<()> {

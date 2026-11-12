@@ -482,6 +482,10 @@ impl Predictor {
             scroll_offset: frame.scroll_offset,
             scroll_visible: frame.scroll_visible,
             input_flags: frame.input_flags,
+            next_image_delay_ms: frame.next_image_delay_ms,
+            image_cell_width: frame.image_cell_width,
+            image_cell_height: frame.image_cell_height,
+            images: frame.images.clone(),
         })
     }
 }
@@ -542,6 +546,10 @@ mod tests {
             scroll_offset: scroll,
             scroll_visible: ROWS as u64,
             input_flags: 0,
+            next_image_delay_ms: None,
+            image_cell_width: 0,
+            image_cell_height: 0,
+            images: Vec::new(),
         })
     }
 
@@ -892,6 +900,10 @@ mod tests {
                 scroll_offset: self.scroll_offset,
                 scroll_visible: self.scroll_visible,
                 input_flags: self.input_flags,
+                next_image_delay_ms: self.next_image_delay_ms,
+                image_cell_width: self.image_cell_width,
+                image_cell_height: self.image_cell_height,
+                images: self.images.clone(),
             }
         }
     }

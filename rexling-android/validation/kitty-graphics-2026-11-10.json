@@ -1,0 +1,41 @@
+{
+  "build": 106,
+  "date": "2026-11-10",
+  "features": [
+    "libghostty Kitty graphics: PNG, RGB/RGBA, grayscale, transparency, clipping and z layers",
+    "Unicode/relative placements from public render-state API",
+    "Library-driven animation deadlines while visible; static terminals do not gain a redraw timer",
+    "Generation-aware pixel sharing and bounded Android bitmap cache",
+    "RXT4 selected/prefetched frames carry binary assets and geometry",
+    "Snapshot restoration and Rex-normalized server file image streaming"
+  ],
+  "limits": {
+    "storage_per_screen_mib": 16,
+    "max_image_dimension": 8192,
+    "png_decoded_mib": 16,
+    "bitmap_cache_per_view_mib": 32
+  },
+  "checks": {
+    "native_workspace_passed": 75,
+    "native_workspace_optional_ignored": 17,
+    "real_rex_stream_and_reconnect_test_passed": true,
+    "jvm_passed": 168,
+    "jvm_optional_skipped": 1,
+    "android_unique_checks_passed": 21,
+    "final_android_regression_checks_passed": 9,
+    "android_live_jni_reconnect_and_animation_passed": true,
+    "release_lint_and_packaging_verified": true
+  },
+  "installation": {
+    "device": "100.97.157.23:33011",
+    "model": "SM-S906E",
+    "version_code": 106,
+    "sha256": "0573add621899c281c8237bea9812c7f37ee2cb15994747ec7bbaa67223816c6",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "wireless ADB"
+  },
+  "temporary_fixture_session_destroyed": true,
+  "temporary_loopback_server_stopped": true,
+  "physical_frame_pacing_profiled": false
+}

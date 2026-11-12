@@ -39,6 +39,23 @@ class TerminalLinkMenuTest {
             assertTrue(view.performLongClick());assertEquals("Docs",view.selectedText)
         }
     }
+    @Test fun selectionPasteUsesTheClipboardRouteAndRejectsChangedTargetsOrLostControl() {
+        fixture(link=false)
+        ui.runOnIdle {
+            val clipboard=view.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val previous=clipboard.primaryClip
+            var pasted=0;var target="pane-a"
+            view.controlled=true;view.imageInputTarget={target};view.onPaste={pasted++;true}
+            try {
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Paste test","hello"))
+                view.performLongClick()
+                target="pane-b";assertFalse(view.pasteSelection());assertEquals(0,pasted)
+                target="pane-a";view.controlled=false;assertFalse(view.pasteSelection())
+                view.controlled=true;assertTrue(view.pasteSelection());assertEquals(1,pasted);assertNull(view.selectedText)
+                assertFalse(view.pasteSelection());assertEquals(1,pasted)
+            } finally {if(previous==null) clipboard.clearPrimaryClip() else clipboard.setPrimaryClip(previous)}
+        }
+    }
     @Test fun copyLinkCopiesTheDestinationAndKeepsTextCopyAvailable() {
         fixture()
         ui.runOnIdle {

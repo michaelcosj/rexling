@@ -80,4 +80,35 @@ class TerminalUpdatesTest {
         assertTrue(decoder.decode(packet(3,1,emptyMap(),"""{"activity":null}""")).activity.isEmpty())
     }
 
+    private fun graphicsPacket(revision: Long,flag: Int=3,asset: Boolean=true,placements: Boolean=true,badLength: Boolean=false,badCrop: Boolean=false): ByteArray {
+        val base=packet(revision,flag,if(flag==3) mapOf(0 to "",1 to "") else emptyMap(),version=3)
+        base[3]='4'.code.toByte()
+        val out=ByteArrayOutputStream();out.write(base)
+        fun n(value: Long,size: Int) {repeat(size) {out.write((value ushr (8*it)).toInt() and 255)}}
+        if(flag>=2) {
+            n(8,4);n(16,4);n(if(asset) 1 else 0,2)
+            if(asset) {n(7,4);n(1,8);n(2,4);n(1,4);n(if(badLength) 7 else 8,4);out.write(byteArrayOf(-1,0,0,-1,0,-1,0,-1))}
+            n(if(placements) 1 else 0,2)
+            if(placements) {
+                n(7,4);n(1,8);n(1,1);n(-1,4);n(0,4);n(0,4)
+                for(v in listOf(0,0,16,16,0,0,if(badCrop) 3 else 2,1)) n(v.toLong(),4)
+            }
+        }
+        n(0,2);return out.toByteArray()
+    }
+    @Test fun imageDeltasReusePixelsAndMetadataOnlyUpdatesKeepTheImage() {
+        val decoder=TerminalUpdates();val first=decoder.decode(graphicsPacket(1)).screen!!
+        assertEquals(1,first.images.size)
+        assertEquals(8,first.imageCellWidth);assertEquals(16,first.imageCellHeight)
+        val next=decoder.decode(graphicsPacket(2,2,asset=false)).screen!!
+        assertSame(first.images[0].image,next.images[0].image)
+        assertSame(next,decoder.decode(graphicsPacket(3,0)).screen)
+        assertTrue(decoder.decode(graphicsPacket(4,2,asset=false,placements=false)).screen!!.images.isEmpty())
+    }
+    @Test fun malformedImagesCannotCommitADecoderRevisionOrReuseAnUnknownBase() {
+        for(bytes in listOf(graphicsPacket(1,badLength=true),graphicsPacket(1,badCrop=true),graphicsPacket(1,asset=false))) {
+            val decoder=TerminalUpdates();assertTrue(runCatching {decoder.decode(bytes)}.isFailure);assertEquals(0L,decoder.revision)
+            assertEquals(1,decoder.decode(graphicsPacket(1)).screen!!.images.size)
+        }
+    }
 }

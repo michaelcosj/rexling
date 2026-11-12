@@ -178,10 +178,11 @@ internal enum class ChromeIcon { SPLIT, SEARCH, CHEVRON, SESSIONS, COPY, MORE, A
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable internal fun ChromeButton(icon: ChromeIcon, description: String, enabled: Boolean = true,
-    modifier: Modifier = Modifier, readable: Boolean = enabled, onClick: () -> Unit) {
+    modifier: Modifier = Modifier, readable: Boolean = enabled, onLongClick: (() -> Unit)?=null, onClick: () -> Unit) {
     Box(modifier.size(36.dp).clip(RoundedCornerShape(12.dp))
-        .clickable(enabled=enabled, role=Role.Button, onClick=onClick)
+        .combinedClickable(enabled=enabled,role=Role.Button,onLongClickLabel=if(onLongClick!=null) "Paste clipboard" else null,onLongClick=onLongClick,onClick=onClick)
         .semantics { contentDescription=description }, contentAlignment=Alignment.Center) {
         ChromeSymbol(icon, color=MaterialTheme.colorScheme.onSurface.copy(alpha=if(readable) .85f else .3f))
     }
@@ -529,7 +530,7 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
 }
 
 @Composable internal fun KeyboardBar(controlled: Boolean,enabled: Boolean,control: Boolean,alt: Boolean,shift: Boolean,
-    keyboardVisible: Boolean,onControl: ()->Unit,onAlt: ()->Unit,onShift: ()->Unit,onShiftPress: ()->Unit,onShiftRelease: (Boolean)->Unit,onKey: (String)->Unit,readable: Boolean=enabled,onControlShortcut: (String)->Unit={},inputKey: String="",shortcutGesture: ControlShortcutGesture=ControlShortcutGesture.HOLD,arrowJoystickEnabled: Boolean=true,onKeyboard: ()->Unit) {
+    keyboardVisible: Boolean,onControl: ()->Unit,onAlt: ()->Unit,onShift: ()->Unit,onShiftPress: ()->Unit,onShiftRelease: (Boolean)->Unit,onKey: (String)->Unit,readable: Boolean=enabled,onControlShortcut: (String)->Unit={},inputKey: String="",shortcutGesture: ControlShortcutGesture=ControlShortcutGesture.HOLD,arrowJoystickEnabled: Boolean=true,onPaste: (() ->Unit)?=null,onKeyboard: ()->Unit) {
     var expanded by remember {mutableStateOf(false)}
     // The extra-key trigger lives just before Esc, outside the initial viewport.
     val keyScroll=rememberScrollState(initial=Int.MAX_VALUE)
@@ -561,8 +562,8 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
                     }
                 }
             }
-            ChromeButton(if(keyboardVisible) ChromeIcon.HIDE_KEYBOARD else ChromeIcon.KEYBOARD,
-                if(!controlled) "Take control and show keyboard" else if(keyboardVisible) "Hide keyboard" else "Show keyboard",enabled,readable=readable,onClick=onKeyboard)
+            key(inputKey) {ChromeButton(if(keyboardVisible) ChromeIcon.HIDE_KEYBOARD else ChromeIcon.KEYBOARD,
+                if(!controlled) "Take control and show keyboard" else if(keyboardVisible) "Hide keyboard" else "Show keyboard",enabled,readable=readable,onLongClick=if(controlled && enabled) onPaste else null,onClick=onKeyboard)}
         }
         if(expanded) {
             val extra=listOf((1..6).map {"F$it" to "f$it"},(7..12).map {"F$it" to "f$it"},

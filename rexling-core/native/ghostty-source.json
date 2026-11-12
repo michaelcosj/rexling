@@ -1,7 +1,7 @@
 {
-  "revision": "f54340ad77814fe319d136e5e915d6a48de8dd23",
-  "source_url": "https://codeload.github.com/ghostty-org/ghostty/tar.gz/f54340ad77814fe319d136e5e915d6a48de8dd23",
-  "source_sha256": "12dc51799cd364608150d82fcca130bc10149be4bf21908f30256d44bc866de4",
+  "revision": "108cacb17ed8990840cd14abfce43d8ed8503ca1",
+  "source_url": "https://codeload.github.com/ghostty-org/ghostty/tar.gz/108cacb17ed8990840cd14abfce43d8ed8503ca1",
+  "source_sha256": "2c276d3e62cb15fb38f0d7f621f199029d1d4df86538096c6bec2a107cad7159",
   "zig_version": "0.17.0",
   "zig": {
     "aarch64-macos": {

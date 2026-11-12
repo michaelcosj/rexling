@@ -1,0 +1,71 @@
+{
+  "build": 107,
+  "changes": [
+    "Hold keyboard button to paste text or images; tap still toggles keyboard",
+    "Native selection toolbar offers Paste for the current controlled input target",
+    "Swipe indicator height reduced from 36dp to 28dp; floating icon clearance preserved"
+  ],
+  "validation": {
+    "android_instrumentation": "37 tests passed: KeyboardBarTest, TerminalLinkMenuTest, TerminalImageInputTest, PaneChromeTest",
+    "release_build": "passed",
+    "lintRelease": "passed",
+    "apk_static_verification": {
+      "apk": "dist/Rexling-2026.11.10-build107-0559dcc969-modified-arm64-release.apk",
+      "application_label": "Rexling",
+      "version_name": "2026.11.10",
+      "version_code": 107,
+      "sha256": "bcdb50fdcb16d8e08e835e48a6701d75a1758b0463e46782f25ce6e327ffc84a",
+      "bytes": 17551103,
+      "signature_verified": true,
+      "debuggable": false,
+      "art_profiles": [
+        {
+          "name": "assets/dexopt/baseline.prof",
+          "bytes": 5985
+        },
+        {
+          "name": "assets/dexopt/baseline.profm",
+          "bytes": 802
+        }
+      ],
+      "zip_alignment_16k": true,
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_LOCAL_NETWORK",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
+        "android.permission.CHANGE_NETWORK_STATE",
+        "dev.shulhi.rex.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+      ],
+      "native_libraries": [
+        {
+          "name": "lib/arm64-v8a/libandroidx.graphics.path.so",
+          "bytes": 10096,
+          "load_alignment": 16384
+        },
+        {
+          "name": "lib/arm64-v8a/libc++_shared.so",
+          "bytes": 1423696,
+          "load_alignment": 16384
+        },
+        {
+          "name": "lib/arm64-v8a/librex_android.so",
+          "bytes": 5442712,
+          "load_alignment": 16384
+        }
+      ],
+      "runtime_execution": "not performed by this static APK check"
+    }
+  },
+  "phone_installation": {
+    "device": "100.97.157.23:41745",
+    "model": "SM-S906E",
+    "version_code": 107,
+    "sha256": "bcdb50fdcb16d8e08e835e48a6701d75a1758b0463e46782f25ce6e327ffc84a",
+    "installation": "success",
+    "settings_preserved": true,
+    "app_launched": false
+  }
+}

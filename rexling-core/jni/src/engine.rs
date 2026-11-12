@@ -21,7 +21,7 @@ pub struct Shared {
     pub revision: u64,
     pub json: String,
     pub activity: Arc<Value>,
-    pub pending_previews: BTreeMap<String, Value>,
+    pub pending_previews: BTreeMap<String, Arc<Frame>>,
     pub frame: Option<Arc<Frame>>,
     pub key: String,
     pub wire: crate::updates::WireBase,
@@ -72,7 +72,7 @@ impl Session {
         value["revision"]=json!(state.revision);
         value["activity"]=state.activity.as_ref().clone();
         value["screen"]=state.frame.as_ref().map_or(Value::Null,|frame|frame_value(frame));
-        value["previews"]=serde_json::to_value(std::mem::take(&mut state.pending_previews))?;
+        value["previews"]=Value::Object(std::mem::take(&mut state.pending_previews).into_iter().map(|(id,frame)|(id,frame_value(&frame))).collect());
         Ok(value.to_string())
     }
 }
@@ -106,7 +106,7 @@ mod shift_enter_tests {
         assert_eq!(input_event(true,SHIFT_ENTER)["type"],"paste");
     }
 }
-type PreviewTask = Pin<Box<dyn Future<Output = Result<Vec<(String, Value)>>>>>;
+type PreviewTask = Pin<Box<dyn Future<Output = Result<Vec<(String, Arc<Frame>)>>>>>;
 fn terminal_edit_call(windows:&Value,session:&str,value:&Value)->Result<(&'static str,Value)> {
     ensure!(value["session"].as_str()==Some(session),"The selected session changed");
     let kind=value["type"].as_str().context("terminal action required")?;
@@ -254,7 +254,7 @@ struct Actor {
     title_events: BTreeMap<String, Value>,
     process_events: BTreeMap<String, Value>,
     program_refresh: tokio::time::Instant,
-    preview_updates: BTreeMap<String, Value>,
+    preview_updates: BTreeMap<String, Arc<Frame>>,
     session_details: Value,
 }
 impl Actor {
@@ -334,6 +334,7 @@ impl Actor {
         self.publish();
         let mut render_at=tokio::time::Instant::now();
         let mut maintenance_at=render_at;
+        let mut animation_at:Option<tokio::time::Instant>=None;
         let mut heartbeat = tokio::time::interval(Duration::from_secs(120));
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         heartbeat.tick().await;
@@ -444,7 +445,8 @@ impl Actor {
                     self.program_task=None;
                     if let Ok(details)=result {self.apply_program_details(details);self.publish();}
                 },
-                _=async {if active {tokio::time::sleep_until(if self.dirty && self.visible {render_at}else{maintenance_at}).await;}else{pending::<()>().await;}}=>{
+                _=async {if active {let deadline=if self.dirty && self.visible {render_at}else{maintenance_at};
+                    tokio::time::sleep_until(animation_at.filter(|_|self.visible).map_or(deadline,|image|image.min(deadline))).await;}else{pending::<()>().await;}}=>{
                     let now=tokio::time::Instant::now();
                     render_at=now+Duration::from_millis(16);
                     maintenance_at=now+Duration::from_secs(1);
@@ -476,11 +478,12 @@ impl Actor {
                         self.program_refresh=tokio::time::Instant::now()+Duration::from_secs(4);
                     }
                     if self.predictor.expire(std::time::Instant::now()) {self.dirty=true;}
-                    if self.dirty && self.visible {
-                        self.dirty=false;
+                    if self.visible && (self.dirty || animation_at.is_some_and(|at|at<=now)) {
+                        self.dirty=false;animation_at=None;
                         if let Some(replica)=self.replica.as_mut().filter(|r|r.ready()) {
                             match replica.terminal().and_then(|t|t.frame()) {
                                 Ok(frame)=>{
+                                    animation_at=frame.next_image_delay_ms.map(|ms|now+Duration::from_millis(ms));
                                     let frame=Arc::new(frame);
                                     let target=self.input_target();
                                     self.predictor.retarget(&prediction_key(&target));
@@ -1271,7 +1274,7 @@ impl Actor {
                 if let (Some(columns),Some(rows))=(value["columns"].as_u64(),value["rows"].as_u64())
                     && columns>0 && rows>0 {
                     self.control.as_mut().context("not connected")?.terminal(&self.selected_session,&self.selected_block,"resize",
-                        json!({"columns":columns.clamp(1,512),"rows":rows.clamp(1,256)})).await?;
+                        resize_args(columns,rows,&value)).await?;
                 }
             }
             "release" => {
@@ -1302,7 +1305,7 @@ impl Actor {
                     if let (Some(cols),Some(rows))=(value["columns"].as_u64(),value["rows"].as_u64())
                         && cols>0 && rows>0 {
                         self.control.as_mut().context("not connected")?.terminal(&self.selected_session,&self.selected_block,"resize",
-                            json!({"columns":cols.clamp(1,512),"rows":rows.clamp(1,256)})).await?;
+                            resize_args(cols,rows,&value)).await?;
                     }
                 }
                 if let Err(error)=self.control.as_mut().context("not connected")?.terminal(&self.selected_session,&self.selected_block,"write",json!({"data":text})).await {
@@ -1346,7 +1349,7 @@ impl Actor {
                     _=>{
                         let cols=value["columns"].as_u64().context("columns required")?.clamp(1,512);
                         let rows=value["rows"].as_u64().context("rows required")?.clamp(1,256);
-                        c.terminal(&self.selected_session,&self.selected_block,"resize",json!({"columns":cols,"rows":rows})).await
+                        c.terminal(&self.selected_session,&self.selected_block,"resize",resize_args(cols,rows,&value)).await
                     }
                 };
                 if let Err(e) = result {
@@ -1524,7 +1527,7 @@ fn preview_task(endpoint: Endpoint, session: String, ids: Vec<String>) -> Previe
                     while !replica.ready() {
                         replica.feed(&data.read().await?)?;
                     }
-                    let frame = frame_json(replica.terminal()?.frame()?);
+                    let frame = Arc::new(replica.terminal()?.frame()?);
                     let _ = data.close().await;
                     Ok::<_, anyhow::Error>(frame)
                 }
@@ -1749,7 +1752,15 @@ fn summary_task(endpoint: Endpoint, sessions: Value, own: String) -> SummaryTask
 fn rgb(rgb: [u8; 3]) -> u32 {
     ((rgb[0] as u32) << 16) | ((rgb[1] as u32) << 8) | rgb[2] as u32
 }
-fn frame_json(frame: Frame) -> Value {frame_value(&frame)}
+/// Terminal resize arguments. Cell pixels let programs size kitty images for
+/// our real cells (Rex otherwise assumes 8x16); Rex requires both or neither.
+fn resize_args(columns: u64,rows: u64,value: &Value) -> Value {
+    let mut args=json!({"columns":columns.clamp(1,512),"rows":rows.clamp(1,256)});
+    if let (Some(w),Some(h))=(value["cellWidth"].as_u64(),value["cellHeight"].as_u64()) && w>0 && h>0 {
+        args["cell_width_px"]=json!(w.min(4096));args["cell_height_px"]=json!(h.min(4096));
+    }
+    args
+}
 fn frame_value(frame: &Frame) -> Value {
     let cells: Vec<Value> = frame
         .cells
@@ -1778,6 +1789,8 @@ mod tests {
         let windows=json!([{"id":"w","blocks":[{"id":"a"},{"id":"b"},{"id":"f"}],"layout":[{"id":"a","floating":false},{"id":"b","floating":false},{"id":"f","floating":true}]}]);
         let command=|kind:&str,id:&str|json!({"type":kind,"session":"s","window":"w","id":id,"label":"  Logs 🦀  ","anchor":"a","direction":"below"});
         let (method,args)=terminal_edit_call(&windows,"s",&command("rename_tab","w")).unwrap();assert_eq!(method,"session.set_window_label");assert_eq!(args["label"],"Logs 🦀");
+        assert_eq!(resize_args(80,24,&json!({"cellWidth":21,"cellHeight":44})),json!({"columns":80,"rows":24,"cell_width_px":21,"cell_height_px":44}));
+        assert_eq!(resize_args(900,24,&json!({"cellWidth":21})),json!({"columns":512,"rows":24}),"both or neither");
         assert_eq!(terminal_edit_call(&windows,"s",&command("rename_pane","b")).unwrap().0,"session.set_block_label");
         assert_eq!(terminal_edit_call(&windows,"s",&command("float_pane","b")).unwrap().0,"session.float_block");
         let (_,args)=terminal_edit_call(&windows,"s",&command("dock_pane","f")).unwrap();assert_eq!(args["anchor_block_id"],"a");assert_eq!(args["direction"],"vertical");
