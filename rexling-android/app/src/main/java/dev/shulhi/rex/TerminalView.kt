@@ -77,6 +77,8 @@ class TerminalView(context: Context) : View(context) {
     var onPaneSwipe: (Int) -> Unit = {}
     var onDimensions: (Int, Int) -> Unit = { _, _ -> }
         set(value) {val changed=field!=value;field=value;if(changed && width>0 && height>0) reportDimensions(force=true)}
+    /** Device-pixel cell size, so the server sizes kitty images for our real cells. */
+    val cellPixels: Pair<Int,Int> get()=desiredCellWidth.roundToInt().coerceIn(1,4096) to desiredCellHeight.roundToInt().coerceIn(1,4096)
     private var currentScreen: TerminalScreen?=null
     var screen: TerminalScreen?
         get()=currentScreen
@@ -180,6 +182,9 @@ class TerminalView(context: Context) : View(context) {
         if(token!=null) android.os.Trace.beginSection("Rexlink.draw.$token")
         val geometry="$width:$height:${frame.columns}:$visibleColumns:$visibleRows:$insetHorizontal:$insetTop:$insetBottom:$extendPadding:${canvas.isHardwareAccelerated}"
         if(geometry!=rowGeometry) {clearRows();recorded=arrayOfNulls(visibleRows);rowGeometry=geometry}
+        // Images below text go under the recorded rows. Default-coloured cell
+        // backgrounds aren't painted, so they show through as in Ghostty.
+        drawImages(canvas,frame.images,TerminalImagePlacement.BELOW_BACKGROUND,TerminalImagePlacement.BELOW_TEXT)
         android.os.Trace.beginSection("Rexlink.linkIndex")
         val rowLinks=try {linkIndex.update(frame)} finally {android.os.Trace.endSection()}
         for(y in 0 until visibleRows) {
@@ -204,6 +209,7 @@ class TerminalView(context: Context) : View(context) {
             canvas.save();canvas.translate(0f,if(y==0) 0f else insetTop+y*cellHeight)
             row.recording.draw(canvas);canvas.restore()
         }
+        drawImages(canvas,frame.images,TerminalImagePlacement.ABOVE_TEXT)
         canvas.save()
         canvas.clipRect(insetHorizontal,insetTop,width-insetHorizontal,height-insetBottom)
         canvas.translate(insetHorizontal,insetTop)
@@ -235,6 +241,16 @@ class TerminalView(context: Context) : View(context) {
         canvas.restoreToCount(saved)
         if(token!=null) android.os.Trace.endSection()
         android.os.Trace.endSection()
+    }
+    private val imagePaint=Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    /** Kitty images, drawn every frame from cached bitmaps so row recordings stay valid. */
+    private fun drawImages(canvas: Canvas,images: TerminalImages,vararg layers: Int) {
+        if(images.isEmpty) return
+        canvas.save()
+        canvas.clipRect(insetHorizontal,insetTop,width-insetHorizontal,height-insetBottom)
+        canvas.translate(insetHorizontal,insetTop)
+        for(layer in layers) images.draw(canvas,layer,cellWidth,cellHeight,imagePaint)
+        canvas.restore()
     }
     private fun drawRow(canvas: Canvas,cells: List<TerminalCell>,columns: Int,top: Float,bottom: Float) {
         var start=0;var end=0;var color=0

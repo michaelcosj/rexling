@@ -1,7 +1,9 @@
 // Public libghostty-vt C ABI only. The Rust-facing ABI is deliberately small.
 #include <ghostty/vt.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef void (*ApcFn)(void *, const uint8_t *, size_t);
 typedef void (*CellFn)(void *, uint16_t, uint16_t, const uint32_t *, size_t,
@@ -11,19 +13,69 @@ typedef struct {
   uint8_t cursor_visible, foreground[3], background[3];
   uint64_t scroll_total, scroll_offset, scroll_visible;
   uint8_t input_flags;
+  /* Kitty graphics: placement-list generation, cell size the placements use,
+     and the next animation deadline in ms from now (-1: none playing). */
+  uint64_t image_generation;
+  uint32_t cell_width_px, cell_height_px;
+  int64_t animation_delay_ms;
 } RpFrame;
+/* One drawable kitty placement, already positioned by the render state. */
+typedef struct {
+  uint32_t image_id;
+  uint64_t image_generation;
+  uint8_t layer;
+  int32_t z, col, row;
+  uint32_t cols, rows, offset_x, offset_y, width, height;
+  uint32_t source_x, source_y, source_width, source_height;
+} RpImage;
+typedef void (*ImageFn)(void *, const RpImage *);
 typedef struct {
   GhosttyTerminal terminal;
   GhosttyRenderState render;
   GhosttyRenderStateRowIterator rows;
   GhosttyRenderStateRowCells cells;
+  GhosttyRenderStateImageIterator images;
   ApcFn callback;
   void *userdata;
 } RpTerminal;
 
+/* Per-pane kitty image budget. Decoded pixels count toward it; the oldest
+   images are evicted first, exactly as in Ghostty. */
+#define RP_IMAGE_LIMIT ((uint64_t)32 * 1024 * 1024)
+
+/* PNG decoding lives in Rust (png crate); it returns an RGBA8 buffer that the
+   shim copies into Ghostty's allocator so the library can own and free it. */
+extern uint8_t *rex_png_decode(const uint8_t *data, size_t len, uint32_t *width,
+                               uint32_t *height, size_t *out_len);
+extern void rex_png_free(uint8_t *data, size_t len);
+static bool decode_png(void *userdata, const GhosttyAllocator *allocator,
+                       const uint8_t *data, size_t len, GhosttySysImage *out) {
+  (void)userdata;
+  uint32_t width = 0, height = 0; size_t pixels_len = 0;
+  uint8_t *pixels = rex_png_decode(data, len, &width, &height, &pixels_len);
+  if (!pixels) return false;
+  uint8_t *owned = ghostty_alloc(allocator, pixels_len);
+  if (owned) memcpy(owned, pixels, pixels_len);
+  rex_png_free(pixels, pixels_len);
+  if (!owned) return false;
+  out->width = width; out->height = height;
+  out->data = owned; out->data_len = pixels_len;
+  return true;
+}
+static pthread_once_t sys_once = PTHREAD_ONCE_INIT;
+static void sys_init(void) {
+  ghostty_sys_set(GHOSTTY_SYS_OPT_DECODE_PNG, (const void *)decode_png);
+}
+static uint64_t now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
 void rp_free(RpTerminal *t) {
   if (!t) return;
   ghostty_render_state_row_cells_free(t->cells);
+  ghostty_render_state_image_iterator_free(t->images);
   ghostty_render_state_row_iterator_free(t->rows);
   ghostty_render_state_free(t->render);
   ghostty_terminal_free(t->terminal);
@@ -41,7 +93,12 @@ static void unknown(GhosttyTerminal terminal, void *userdata,
 }
 static int configure(RpTerminal *t) {
   size_t limit = 65536;
+  uint64_t images = RP_IMAGE_LIMIT;
   int r = ghostty_terminal_set(t->terminal, GHOSTTY_TERMINAL_OPT_USERDATA, t);
+  /* File, temp-file and shared-memory media stay off: they name paths on the
+     server, which this replica must never read. */
+  if (r == 0) r = ghostty_terminal_set(t->terminal,
+      GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &images);
   if (r == 0) r = ghostty_terminal_set(t->terminal,
       GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE, (const void *)unknown);
   if (r == 0) r = ghostty_terminal_set(t->terminal,
@@ -64,10 +121,12 @@ static int configure(RpTerminal *t) {
   if (r == 0) r = ghostty_render_state_new(NULL, &t->render);
   if (r == 0) r = ghostty_render_state_row_iterator_new(NULL, &t->rows);
   if (r == 0) r = ghostty_render_state_row_cells_new(NULL, &t->cells);
+  if (r == 0) r = ghostty_render_state_image_iterator_new(NULL, &t->images);
   return r;
 }
 int rp_new(uint16_t cols, uint16_t rows, RpTerminal **out) {
   *out = NULL;
+  pthread_once(&sys_once, sys_init);
   RpTerminal *t = calloc(1, sizeof(*t));
   if (!t) return GHOSTTY_OUT_OF_MEMORY;
   int r = ghostty_terminal_new(NULL, &t->terminal, cols, rows);
@@ -78,10 +137,14 @@ int rp_new(uint16_t cols, uint16_t rows, RpTerminal **out) {
 }
 int rp_decode(const uint8_t *bytes, size_t len, RpTerminal **out, size_t *offset) {
   *out = NULL;
+  pthread_once(&sys_once, sys_init);
   RpTerminal *t = calloc(1, sizeof(*t));
   if (!t) return GHOSTTY_OUT_OF_MEMORY;
   GhosttySnapshotDecoder decoder = NULL;
+  uint64_t images = RP_IMAGE_LIMIT;
   int r = ghostty_snapshot_decoder_new_buf(NULL, &decoder, bytes, len);
+  if (r == 0) r = ghostty_snapshot_decoder_set(decoder,
+      GHOSTTY_SNAPSHOT_DECODER_OPT_KITTY_IMAGE_STORAGE_LIMIT, &images);
   if (r == 0) r = ghostty_snapshot_decoder_decode(decoder, &t->terminal);
   if (r == 0) r = ghostty_snapshot_decoder_get(decoder,
       GHOSTTY_SNAPSHOT_DECODER_DATA_SOURCE_OFFSET, offset);
@@ -194,7 +257,68 @@ int rp_wheel(RpTerminal *t,int down,int col,int row,uint32_t cw,uint32_t ch,char
 int rp_click(RpTerminal *t,int col,int row,uint32_t cw,uint32_t ch,char *out,size_t capacity,size_t *len) {
   return rp_mouse(t,GHOSTTY_MOUSE_BUTTON_LEFT,1,col,row,cw,ch,out,capacity,len);
 }
-int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
+/* Set the image budget; zero disables kitty graphics on this replica only. */
+int rp_image_limit(RpTerminal *t, uint64_t bytes) {
+  return ghostty_terminal_set(t->terminal, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &bytes);
+}
+/* Borrow one image's decoded pixels. Valid until the next mutating call. */
+int rp_image_pixels(RpTerminal *t, uint32_t id, uint32_t *width, uint32_t *height,
+                    uint32_t *format, const uint8_t **data, size_t *len) {
+  GhosttyKittyGraphics graphics = NULL;
+  int r = ghostty_terminal_get(t->terminal, GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS, &graphics);
+  if (r != 0) return r;
+  GhosttyKittyGraphicsImage image = ghostty_kitty_graphics_image(graphics, id);
+  if (!image) return GHOSTTY_NO_VALUE;
+  GhosttyKittyImageFormat kind = GHOSTTY_KITTY_IMAGE_FORMAT_RGBA;
+  r = ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_WIDTH, width);
+  if (r == 0) r = ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_HEIGHT, height);
+  if (r == 0) r = ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_FORMAT, &kind);
+  if (r == 0) r = ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR, data);
+  if (r == 0) r = ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN, len);
+  *format = (uint32_t)kind;
+  return r;
+}
+static int64_t tick_animations(RpTerminal *t) {
+  GhosttyKittyGraphics graphics = NULL;
+  if (ghostty_terminal_get(t->terminal, GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS, &graphics) != 0 || !graphics)
+    return -1;
+  uint64_t now = now_ms(), next = 0;
+  if (ghostty_kitty_graphics_animation_tick(graphics, now, &next) != GHOSTTY_SUCCESS) return -1;
+  return next > now ? (int64_t)(next - now) : 0;
+}
+static int report_images(RpTerminal *t, ImageFn callback, void *userdata) {
+  int r = ghostty_render_state_get(t->render, GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR, &t->images);
+  if (r != 0) return r;
+  while (ghostty_render_state_image_iterator_next(t->images)) {
+    GhosttyImageProtocol protocol = GHOSTTY_IMAGE_PROTOCOL_KITTY;
+    r = ghostty_render_state_image_get(t->images, GHOSTTY_RENDER_STATE_IMAGE_DATA_PROTOCOL, &protocol);
+    if (r != 0) return r;
+    if (protocol != GHOSTTY_IMAGE_PROTOCOL_KITTY) continue; /* skip protocols we don't know */
+    RpImage image = {0};
+    GhosttyRenderStateImageLayer layer = GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT;
+    const GhosttyRenderStateImageData keys[] = {
+      GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_ID, GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_GENERATION,
+      GHOSTTY_RENDER_STATE_IMAGE_DATA_LAYER, GHOSTTY_RENDER_STATE_IMAGE_DATA_Z,
+      GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_COL, GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_ROW,
+      GHOSTTY_RENDER_STATE_IMAGE_DATA_GRID_COLS, GHOSTTY_RENDER_STATE_IMAGE_DATA_GRID_ROWS,
+      GHOSTTY_RENDER_STATE_IMAGE_DATA_CELL_OFFSET_X, GHOSTTY_RENDER_STATE_IMAGE_DATA_CELL_OFFSET_Y,
+      GHOSTTY_RENDER_STATE_IMAGE_DATA_PIXEL_WIDTH, GHOSTTY_RENDER_STATE_IMAGE_DATA_PIXEL_HEIGHT,
+      GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_X, GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_Y,
+      GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_WIDTH, GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_HEIGHT};
+    void *values[] = {&image.image_id, &image.image_generation, &layer, &image.z,
+      &image.col, &image.row, &image.cols, &image.rows, &image.offset_x, &image.offset_y,
+      &image.width, &image.height, &image.source_x, &image.source_y,
+      &image.source_width, &image.source_height};
+    r = ghostty_render_state_image_get_multi(t->images, sizeof(keys)/sizeof(keys[0]), keys, values, NULL);
+    if (r != 0) return r;
+    image.layer = (uint8_t)layer;
+    callback(userdata, &image);
+  }
+  return 0;
+}
+int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata,
+             uint64_t known_images, ImageFn image_callback, void *image_userdata) {
+  frame->animation_delay_ms = tick_animations(t);
   int r = ghostty_render_state_update(t->render, t->terminal);
   if (r != 0) return r;
   GhosttyRenderStateColors colors = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
@@ -216,6 +340,17 @@ int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
   frame->cursor_visible=(cursor.visible && cursor.viewport_has_value) | (cursor.viewport_has_value<<1);
   memcpy(frame->foreground,&colors.foreground,3);
   memcpy(frame->background,&colors.background,3);
+  uint32_t width_px=0,height_px=0;
+  if(ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_WIDTH_PX,&width_px)==0 && frame->columns)
+    frame->cell_width_px=width_px/frame->columns;
+  if(ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_HEIGHT_PX,&height_px)==0 && frame->rows)
+    frame->cell_height_px=height_px/frame->rows;
+  GET(GHOSTTY_RENDER_STATE_DATA_IMAGE_PLACEMENTS_GENERATION,&frame->image_generation);
+  /* Only walk the image list when it changed; the caller keeps the last one. */
+  if(frame->image_generation!=known_images && image_callback) {
+    r=report_images(t,image_callback,image_userdata);
+    if(r!=0)return r;
+  }
   GET(GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,&t->rows);
   uint16_t y=0;
   uint32_t *graphemes=NULL; size_t capacity=0;

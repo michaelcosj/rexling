@@ -835,3 +835,37 @@ The existing native metadata field `sent` now carries confirmed progress.
 
 Ping/Pong behavior follows [RFC 6455 sections 5.5.2–5.5.3](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.2).
 It was verified against both configured Rex servers and throttled loopback peers.
+
+## Kitty graphics and RXT4 (2026-11-12)
+
+The replica now stores kitty graphics images. libghostty-vt parses `ESC _ G`
+APCs, stores images per screen and positions every placement (cell, Unicode
+placeholder and relative) in its render state. The shim sets a 32 MB per-pane
+storage limit, also applied when restoring a snapshot. It registers a PNG
+decoder that calls into Rust (`png` crate). File, temp-file and shared-memory
+media stay disabled because they name server paths. There is still no
+`WRITE_PTY` callback: the server's terminal answers `a=q` queries (verified:
+Rex replies OK).
+
+Rex's snapshots carry kitty storage records, so images survive reconnecting.
+Live transmissions arrive as ordinary VT. No Rex wire changes.
+
+Resize and take now send `cell_width_px`/`cell_height_px` (the live view's
+cell size in device pixels) with `com.superlogical.terminal.resize`. Without
+them Rex reported 8×16 px cells and programs sized images for those.
+
+Local JNI packets use RXT4: RXT3 followed by an image section.
+- `u8 flag`. 0 means unchanged; keep the previous placements and pixels.
+- If the flag is 1, the section continues with:
+  - `u32 cell_w, u32 cell_h`: the replica cell pixels that placement sizes use.
+  - `u16 n` placements, each: `u32 id, u64 generation, u8 layer, i32 z, i32 col,
+    i32 row, u32 cols, rows, offset_x, offset_y, width, height, source_x,
+    source_y, source_w, source_h`. Layers are 0 below backgrounds, 1 below text,
+    2 above text. The order is layer, then z.
+  - `u16 m` pixel blobs, each: `u32 id, u64 generation, u32 w, u32 h, u32 len`,
+    then straight RGBA8 bytes.
+
+Pixels are sent once per (id, generation) per decoder and resent after a
+reset. Android drops pixels that the latest list doesn't reference. Placements
+are drawn every frame from cached bitmaps, so row recordings stay valid.
+Android still accepts RXT1–RXT3.

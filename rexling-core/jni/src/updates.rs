@@ -1,6 +1,7 @@
 //! Local JNI format, not Rex wire protocol. One decoder per native handle.
 use crate::engine::Shared;
-use rex_core::ghostty::{Cell, Frame};
+use rex_core::ghostty::{Cell, Frame, ImagePlacement};
+use std::collections::BTreeSet;
 use std::sync::{Arc, Condvar, Mutex};
 
 #[derive(Default)]
@@ -43,6 +44,8 @@ pub struct WireBase {
     activity: Arc<serde_json::Value>,
     key: String,
     frame: Option<Arc<Frame>>,
+    /// (image id, generation) pairs whose pixels Kotlin has, for this decoder.
+    sent_pixels: BTreeSet<(u32, u64)>,
 }
 fn u16le(out: &mut Vec<u8>, v: u16) {
     out.extend(v.to_le_bytes());
@@ -76,7 +79,7 @@ pub fn encode(state: &mut Shared, after: u64) -> Vec<u8> {
     }
     let base = &state.wire;
     let reset = after != base.revision || base.key != state.key;
-    let mut out = b"RXT3".to_vec();
+    let mut out = b"RXT4".to_vec();
     u64le(&mut out, state.revision);
     let previews = std::mem::take(&mut state.pending_previews);
     let activity_changed=reset || !Arc::ptr_eq(&base.activity,&state.activity);
@@ -160,14 +163,54 @@ pub fn encode(state: &mut Shared, after: u64) -> Vec<u8> {
             }
         }
     }
+    let mut sent_pixels = if reset {BTreeSet::new()} else {std::mem::take(&mut state.wire.sent_pixels)};
+    images(&mut out, state.frame.as_deref(), state.wire.frame.as_deref().filter(|_| !reset), &mut sent_pixels);
     state.wire = WireBase {
         revision: state.revision,
         metadata: state.json.clone(),
         activity: state.activity.clone(),
         key: state.key.clone(),
         frame: state.frame.clone(),
+        sent_pixels,
     };
     out
+}
+/// RXT4 image section: `u8 flag` (0 unchanged, 1 replace), then for 1:
+/// `u32 cell_w, u32 cell_h, u16 n` placements, `u16 m` pixel blobs.
+/// Kotlin drops cached pixels not referenced by the latest placement list.
+/// Pixel size is bounded by the replica's per-pane kitty storage limit.
+fn images(out: &mut Vec<u8>, frame: Option<&Frame>, old: Option<&Frame>, sent: &mut BTreeSet<(u32, u64)>) {
+    let Some(frame) = frame else {out.push(0);return;};
+    let missing: Vec<_> = frame.image_pixels.iter().filter(|(key, _)| !sent.contains(key)).collect();
+    // libghostty's placement generation changes with every list change; frames
+    // without images never need an update between them.
+    let same = old.is_some_and(|old| (old.images.is_empty() && frame.images.is_empty())
+        || (old.image_generation == frame.image_generation && old.cell_px == frame.cell_px));
+    if same && missing.is_empty() {out.push(0);return;}
+    out.push(1);
+    u32le(out, frame.cell_px.0);
+    u32le(out, frame.cell_px.1);
+    u16le(out, frame.images.len() as u16);
+    for p in frame.images.iter() {placement(out, p);}
+    u16le(out, missing.len() as u16);
+    for ((id, generation), pixels) in missing {
+        u32le(out, *id);
+        u64le(out, *generation);
+        u32le(out, pixels.width);
+        u32le(out, pixels.height);
+        u32le(out, pixels.rgba.len() as u32);
+        out.extend_from_slice(&pixels.rgba);
+        sent.insert((*id, *generation));
+    }
+    // Forget pixels Kotlin will drop with the new list.
+    sent.retain(|key| frame.image_pixels.iter().any(|(k, _)| k == key));
+}
+fn placement(out: &mut Vec<u8>, p: &ImagePlacement) {
+    u32le(out, p.image_id);
+    u64le(out, p.image_generation);
+    out.push(p.layer);
+    for v in [p.z, p.col, p.row] {out.extend(v.to_le_bytes());}
+    for v in [p.cols, p.rows, p.offset_x, p.offset_y, p.width, p.height, p.source_x, p.source_y, p.source_width, p.source_height] {u32le(out, v);}
 }
 #[cfg(test)]
 mod tests {
@@ -217,6 +260,11 @@ mod wire_tests {
             scroll_offset: 0,
             scroll_visible: 50,
             input_flags: 0,
+            images: Arc::from([]),
+            image_generation: 0,
+            cell_px: (0, 0),
+            animation_delay_ms: None,
+            image_pixels: Arc::from([]),
         }
     }
     #[test]
@@ -266,14 +314,14 @@ mod wire_tests {
         let mut first=frame();
         for c in &mut first.cells[..3] {c.hyperlink=Some("https://example.com/one".into());}
         let mut state=Shared {revision:1,json:"{}".into(),pending_previews:BTreeMap::new(),frame:Some(Arc::new(first)),key:"a".into(),wire:WireBase::default(),activity:Arc::default()};
-        let full=encode(&mut state,0);assert_eq!(&full[..4],b"RXT3");
+        let full=encode(&mut state,0);assert_eq!(&full[..4],b"RXT4");
         assert_eq!(full.windows(b"https://example.com/one".len()).filter(|w|*w==b"https://example.com/one").count(),1);
         let mut next=frame();for c in &mut next.cells[..3] {c.hyperlink=Some("https://example.com/two".into());}
         state.frame=Some(Arc::new(next));state.revision=2;
         let delta=encode(&mut state,1);assert_eq!(delta[16],2);assert!(delta.len()<full.len()/20);
-        assert!(delta.ends_with(b"https://example.com/two"));
+        assert!(delta.ends_with(b"https://example.com/two\0"),"rows then an unchanged image flag");
         state.frame=Some(Arc::new(frame()));state.revision=3;
-        let removed=encode(&mut state,2);assert_eq!(removed[16],2);assert!(removed.ends_with(&[0,0]));
+        let removed=encode(&mut state,2);assert_eq!(removed[16],2);assert!(removed.ends_with(&[0,0,0]));
     }
 
     #[test] fn activity_catalog_is_sent_only_when_changed_and_resets_clear_it() {
@@ -286,4 +334,41 @@ mod wire_tests {
         state.revision=4;assert!(metadata(&encode(&mut state,1))["activity"].is_null());
     }
 
+
+    #[test]
+    fn image_pixels_are_sent_once_per_generation_and_reset_with_the_base() {
+        use rex_core::ghostty::{ImagePixels, ImagePlacement};
+        let placement = ImagePlacement {image_id: 7, image_generation: 3, layer: 2, cols: 2, rows: 1, width: 20, height: 20, source_width: 2, source_height: 2, ..Default::default()};
+        let mut with_image = frame();
+        with_image.images = Arc::from([placement]);
+        with_image.image_generation = 9;
+        with_image.cell_px = (10, 20);
+        with_image.image_pixels = Arc::from([((7, 3), Arc::new(ImagePixels {width: 2, height: 2, rgba: vec![0xAB; 16]}))]);
+        let with_image = Arc::new(with_image);
+        let mut state = Shared {
+            revision: 1, json: "{}".into(), pending_previews: BTreeMap::new(),
+            frame: Some(with_image.clone()), key: "s:a".into(), wire: WireBase::default(), activity: Arc::new(serde_json::json!([])),
+        };
+        let blob = [0xABu8; 16];
+        let count = |p: &[u8]| p.windows(16).filter(|w| *w == blob).count();
+        let full = encode(&mut state, 0);
+        assert_eq!(count(&full), 1, "first packet carries pixels");
+        // Same frame again (metadata-only revision): no image section change.
+        state.revision = 2;
+        let same = encode(&mut state, 1);
+        assert_eq!(*same.last().unwrap(), 0, "unchanged image flag");
+        // Placement moves (new list) but pixels are already on the Kotlin side.
+        let mut moved = (*with_image).clone();
+        moved.images = Arc::from([ImagePlacement {row: 1, ..placement}]);
+        moved.image_generation = 10;
+        state.frame = Some(Arc::new(moved));
+        state.revision = 3;
+        let delta = encode(&mut state, 2);
+        assert_eq!(count(&delta), 0, "pixels are not resent");
+        assert!(delta.len() < 200);
+        // An unknown base (new decoder) resends pixels.
+        state.revision = 4;
+        let reset = encode(&mut state, 0);
+        assert_eq!(count(&reset), 1);
+    }
 }
