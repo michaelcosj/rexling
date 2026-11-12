@@ -1,5 +1,7 @@
 package dev.shulhi.rex
 
+import dev.chrisbanes.haze.HazeState
+
 import androidx.activity.compose.BackHandler
 
 import androidx.compose.foundation.layout.*
@@ -43,9 +45,9 @@ import androidx.compose.ui.window.PopupProperties
 import kotlin.math.roundToInt
 
 @Composable internal fun NeovimShortcutButton(items: List<NeovimShortcut>,target: String,enabled: Boolean,onChoose: (NeovimShortcut,String)->Unit,onCustomize: ()->Unit,modifier: Modifier=Modifier,
-    position: Offset=Offset(0f,1f),onPosition: (Offset)->Unit={},bottomInset: Dp=10.dp,layout: NeovimShortcutLayout=NeovimShortcutLayout.GRID,effect: NeovimShortcutEffect=NeovimShortcutEffect.FAN_OUT,hapticsEnabled: Boolean=true,name: String="Neovim") {
+    position: Offset=Offset(0f,1f),onPosition: (Offset)->Unit={},bottomInset: Dp=10.dp,layout: NeovimShortcutLayout=NeovimShortcutLayout.GRID,effect: NeovimShortcutEffect=NeovimShortcutEffect.FAN_OUT,hapticsEnabled: Boolean=true,name: String="Neovim",hazeState: HazeState?=null,onExpandedChange: (Boolean)->Unit={}) {
     if(layout==NeovimShortcutLayout.CIRCULAR) {
-        NeovimRadialShortcutButton(items,target,enabled,onChoose,modifier,position,onPosition,bottomInset,effect,hapticsEnabled,name)
+        NeovimRadialShortcutButton(items,target,enabled,onChoose,modifier,position,onPosition,bottomInset,effect,hapticsEnabled,name,hazeState,onExpandedChange)
         return
     }
     var open by remember(target) {mutableStateOf(false)}

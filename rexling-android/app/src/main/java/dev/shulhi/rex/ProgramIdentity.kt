@@ -18,7 +18,7 @@ data class ProgramIdentity(val kind: ProgramKind, val label: String, val executa
 
     /** A task title is presentation only; executable identity still chooses the icon. */
     fun paneTitle(paneLabel: String, reportedTitle: String = ""): String =
-        if (isShell) title else reportedTitle.takeUnless(::genericTitle) ?: paneLabel.takeUnless(::genericTitle) ?: title
+        paneLabel.takeUnless {genericTitle(it) || it.equals(title,true) || it.equals(label,true)} ?: if (isShell) title else reportedTitle.takeUnless(::genericTitle) ?: title
 
     /** Explicit tab names stay put; defaults follow the remembered focused pane. */
     fun tabTitle(windowLabel: String, paneLabel: String, number: Int, reportedTitle: String = ""): String {
@@ -35,6 +35,7 @@ data class ProgramIdentity(val kind: ProgramKind, val label: String, val executa
         val Terminal = ProgramIdentity(ProgramKind.TERMINAL, "Terminal")
         val Loading = ProgramIdentity(ProgramKind.TERMINAL,"Loading…",pending=true)
         fun resolve(candidates: List<String>): ProgramIdentity {
+            var runtime: ProgramIdentity?=null
             for (candidate in candidates) {
                 val path = candidate.replace('\\', '/').lowercase(Locale.ROOT)
                 val name = path.substringAfterLast('/').trimStart('-').removeSuffix(".exe").removeSuffix(".cmd")
@@ -52,17 +53,24 @@ data class ProgramIdentity(val kind: ProgramKind, val label: String, val executa
                     name in listOf("cloudflared", "cloudflare") -> ProgramKind.CLOUDFLARE
                     else -> null
                 }
-                if (kind != null) return ProgramIdentity(kind, when(kind) {
+                if (kind == null) {
+                    if(name !in shellNames && name !in setOf("shell","terminal","placeholder","minimal") && ProgramCatalog.tile(name)!=null) return ProgramIdentity(ProgramKind.TERMINAL,name,name,candidates=candidates)
+                    continue
+                }
+                val resolved=ProgramIdentity(kind, when(kind) {
                     ProgramKind.CLAUDE -> "Claude Code"; ProgramKind.CODEX -> "Codex"
                     ProgramKind.NEOVIM -> "Neovim"; ProgramKind.VIM -> "Vim"; ProgramKind.GIT -> "Git"
                     ProgramKind.PYTHON -> "Python"; ProgramKind.NODE -> "JavaScript runtime"
                     ProgramKind.SSH -> "Remote shell"; ProgramKind.TMUX -> "Terminal multiplexer"
                     ProgramKind.MONITOR -> "System monitor"; ProgramKind.CLOUDFLARE -> "Cloudflare"; ProgramKind.TERMINAL -> "Terminal"
                 },name,candidates=candidates)
+                if(kind in listOf(ProgramKind.NODE,ProgramKind.PYTHON)) {if(runtime==null) runtime=resolved} else return resolved
             }
-            val name = candidates.firstOrNull()?.replace('\\', '/')?.substringAfterLast('/')?.trimStart('-')
+            runtime?.let {return it}
+            val fallback=candidates.firstOrNull {candidate->candidate.replace('\\','/').substringAfterLast('/').trimStart('-').lowercase(Locale.ROOT) !in shellNames} ?: candidates.firstOrNull()
+            val name = fallback?.replace('\\', '/')?.substringAfterLast('/')?.trimStart('-')
                 ?.filterNot { it.isISOControl() || Character.getType(it)==Character.FORMAT.toInt() }?.take(40).orEmpty()
-            return ProgramIdentity(ProgramKind.TERMINAL, name.ifBlank { "Terminal" },candidates=candidates)
+            return ProgramIdentity(ProgramKind.TERMINAL, name.ifBlank { "Terminal" },name,candidates=candidates)
         }
     }
 }

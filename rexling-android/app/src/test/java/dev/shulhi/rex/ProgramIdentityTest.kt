@@ -91,4 +91,38 @@ class ProgramIdentityTest {
         assertEquals("Task title",ProgramIdentity.Loading.paneTitle("shell","Task title"))
     }
 
+    @Test fun explicitPaneNamesOverrideShellAndAgentTitlesWithoutChangingTheirIcons() {
+        for(program in listOf(ProgramIdentity.resolve(listOf("fish")),ProgramIdentity.resolve(listOf("codex")))) {
+            assertEquals("Deploy logs",program.paneTitle("Deploy logs","Animated program title"))
+        }
+        assertEquals("Task",ProgramIdentity.resolve(listOf("claude")).paneTitle("Claude","Task"))
+    }
+
+    @Test fun catalogProgramsAndAliasesUseExecutableMetadata() {
+        val programs=mapOf("yazi" to "yazi","docker-compose" to "docker","podman" to "podman",
+            "kubectl" to "kube","helm" to "kube","k9s" to "k9s","gh" to "github","glab" to "gitlab",
+            "cargo" to "rust","go" to "go","brew.rb" to "brew","psql" to "postgres","sqlite3" to "sqlite",
+            "ollama" to "ollama","opencode" to "opencode","gemini" to "gemini","agy" to "antigravity","rex-server" to "rex",
+            "bun" to "bun","pnpm" to "pnpm","uv" to "uv","batcat" to "bat","hx" to "hx","nu" to "nushell")
+        for((executable,tile) in programs) {
+            val resolved=ProgramIdentity.resolve(if(executable=="nu") listOf("/opt/bin/$executable") else listOf("/bin/fish","/opt/bin/$executable"))
+            assertEquals(executable,resolved.executable)
+            assertEquals(tile,ProgramCatalog.tile(resolved.executable))
+            assertEquals(tile,ProgramCatalog.tile("C:\\tools\\$executable.exe"))
+        }
+        assertNull(ProgramCatalog.tile("my-docker-helper"))
+        assertNull(ProgramCatalog.tile("/projects/yazi/custom-task"))
+        val state=AppState.parse("""{"programs":{"a":["fish"]},"titles":{"a":"docker"}}""")
+        assertEquals("fish",state.programs.getValue("a").executable)
+        assertEquals("fish",ProgramCatalog.tile(state.programs.getValue("a").executable))
+    }
+    @Test fun specificProgramsWinOverInterpreterAndShellWrappers() {
+        for((runtime,program) in listOf("node" to "gemini","node" to "codex","python3" to "jupyter","bash" to "yazi")) {
+            assertEquals(program,ProgramIdentity.resolve(listOf(runtime,program)).executable)
+        }
+        assertEquals(ProgramKind.NODE,ProgramIdentity.resolve(listOf("node","shell")).kind)
+        assertEquals(ProgramKind.PYTHON,ProgramIdentity.resolve(listOf("python3","custom-script.py")).kind)
+        assertEquals("custom-task",ProgramIdentity.resolve(listOf("fish","custom-task")).label)
+    }
+
 }

@@ -1,0 +1,24 @@
+{
+  "build": 88,
+  "entry_points": [
+    "Terminal three-dot menu",
+    "Session drawer New session button",
+    "Empty connected server view"
+  ],
+  "target_server_shown": true,
+  "dialog_stays_open_if_request_rejected": true,
+  "blank_name_supported": true,
+  "android_tests_passed": 5,
+  "jvm_tests_passed": 157,
+  "jvm_optional_skipped": 1,
+  "release_lint_packaging_verified": true,
+  "installation": {
+    "device": "100.97.157.23:37229",
+    "model": "SM-S906E",
+    "version_code": 88,
+    "sha256": "133921b1b92c07f8e37d2ee20dc3de419cad6d2e6f1d21d8402383d227a580f9",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "wireless ADB"
+  }
+}

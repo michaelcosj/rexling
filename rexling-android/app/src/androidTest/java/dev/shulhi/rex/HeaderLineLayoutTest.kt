@@ -29,7 +29,7 @@ class HeaderLineLayoutTest {
             CompositionLocalProvider(LocalDensity provides Density(density,scale.value)) {MaterialTheme {
                 Box(Modifier.width(340.dp).testTag("header")) {
                     SessionHeader(listOf(SessionItem("a","alpha · Mac")),"a",true,true,
-                        listOf(ProgramIdentity(ProgramKind.CLAUDE,"Claude Code")),0,directory.value,{},{},{},title=title.value,menu={})
+                        listOf(ProgramIdentity(ProgramKind.CLAUDE,"Claude Code")),0,directory.value,{},{},{},title=title.value,serverIcons=mapOf("a" to ServerIcon.MACBOOK),menu={})
                 }
             }}
         }

@@ -1,5 +1,12 @@
 package dev.shulhi.rex
 
+import dev.chrisbanes.haze.HazeState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.asAndroidPath
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
@@ -133,13 +140,20 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
 }
 
 @Composable internal fun NeovimRadialShortcutButton(items: List<NeovimShortcut>,target: String,enabled: Boolean,
-    onChoose: (NeovimShortcut,String)->Unit,modifier: Modifier,position: Offset,onPosition: (Offset)->Unit,bottomInset: Dp,effect: NeovimShortcutEffect,hapticsEnabled: Boolean,name: String="Neovim") {
+    onChoose: (NeovimShortcut,String)->Unit,modifier: Modifier,position: Offset,onPosition: (Offset)->Unit,bottomInset: Dp,effect: NeovimShortcutEffect,hapticsEnabled: Boolean,name: String="Neovim",hazeState: HazeState?=null,onExpandedChange: (Boolean)->Unit={}) {
+    val notifyBackdrop by rememberUpdatedState(onExpandedChange)
+    val localHaze=remember {HazeState()}
+    val haze=hazeState ?: localHaze
+    val host=LocalView.current
+    val invalidator=remember(host) {PopupFrostInvalidator(host)}
     val wheel=remember(target,items,effect) {NeovimWheelState(items)}
-    DisposableEffect(wheel) {onDispose {wheel.close()}}
+    DisposableEffect(wheel) {onDispose {wheel.close();notifyBackdrop(false)}}
     val transition=key(wheel) {updateTransition(wheel.open && enabled,label="Neovim wheel visibility")}
     val animatedReveal=transition.animateFloat(transitionSpec={tween(if(targetState) effect.openMillis else effect.closeMillis,easing=LinearEasing)},label="Radial opening effect") {if(it) 1f else 0f}
     val reveal=if(effect==NeovimShortcutEffect.NONE) remember {mutableStateOf(1f)} else animatedReveal
     val showing=enabled && (if(effect==NeovimShortcutEffect.NONE) wheel.open else transition.currentState || transition.targetState || transition.isRunning)
+    LaunchedEffect(showing) {notifyBackdrop(showing)}
+    DisposableEffect(invalidator,showing) {if(showing) invalidator.start();onDispose {invalidator.stop()}}
     // The non-focusable popup preserves a held gesture; consume Back as before.
     BackHandler(showing) {}
     val scope=rememberCoroutineScope()
@@ -228,14 +242,14 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
                 }}
                 Popup(popupPositionProvider=provider,onDismissRequest={},
                     properties=PopupProperties(focusable=false,dismissOnClickOutside=false,dismissOnBackPress=false,clippingEnabled=false)) {
-                    NeovimShortcutWheel(wheel,width,effect,reveal,tick,name) {item->latestChoose(item,target)}
+                    NeovimShortcutWheel(wheel,width,effect,reveal,tick,name,haze,invalidator) {item->latestChoose(item,target)}
                 }
             }
         }
     }
 }
 
-@Composable private fun NeovimShortcutWheel(wheel: NeovimWheelState,width: Dp,effect: NeovimShortcutEffect,reveal: State<Float>,onTick: ()->Unit,name: String,onChoose: (NeovimShortcut)->Unit) {
+@Composable private fun NeovimShortcutWheel(wheel: NeovimWheelState,width: Dp,effect: NeovimShortcutEffect,reveal: State<Float>,onTick: ()->Unit,name: String,haze: HazeState,invalidator: PopupFrostInvalidator,onChoose: (NeovimShortcut)->Unit) {
     val choose by rememberUpdatedState(onChoose)
     val config=LocalViewConfiguration.current
     val pageThreshold=with(LocalDensity.current) {28.dp.toPx()}
@@ -284,6 +298,14 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
                 } finally {wheel.highlighted=-1}
             }
         }) {
+            repeat(wheel.slots) {index->
+                val progress=neovimWheelEffectProgress(effect,reveal.value,index,wheel.slots)
+                if(progress>0f) {
+                    val shape=remember(index,wheel.slots,effect,progress) {WheelFrostSector(index,wheel.slots,effect,progress)}
+                    Box(Modifier.fillMaxSize().graphicsLayer {alpha=(progress*3f).coerceIn(0f,1f)}
+                        .paneFrost(haze,shape,darkSurface=true,edge=false,invalidator=invalidator))
+                }
+            }
             Canvas(Modifier.fillMaxSize()) {
                 val outer=size.minDimension/2-1.dp.toPx()
                 val inner=size.minDimension*.23f
@@ -313,7 +335,7 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
                         translate(offset.x,offset.y) {
                             rotate(turn,center) {
                               scale(zoom,zoom,center) {
-                                drawPath(path,(if(visible.getOrNull(index) is NeovimShortcutEntry.Group) Color(0xFF30343D) else Color(0xFF25282F)).copy(alpha=opacity))
+                                drawPath(path,(if(visible.getOrNull(index) is NeovimShortcutEntry.Group) Color(0xFF30343D) else Color(0xFF25282F)).copy(alpha=(if(visible.getOrNull(index) is NeovimShortcutEntry.Group) .13f else .08f)*opacity))
                                 if(index==wheel.highlighted) drawPath(path,accent.copy(alpha=.45f*opacity))
                                 drawPath(path,Color.White.copy(alpha=.14f*opacity),style=Stroke(1.dp.toPx()))
                                 if(index==wheel.highlighted) drawArc(accent.copy(alpha=opacity),start+1,step-2,false,outerRect.topLeft,outerRect.size,style=Stroke(3.dp.toPx()))
@@ -350,10 +372,11 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
                         maxLines=1,overflow=TextOverflow.Ellipsis,textAlign=TextAlign.Center,color=Color.White)
                 }
             }
+            Box(Modifier.align(Alignment.Center).size(centerSize).graphicsLayer {alpha=(reveal.value*6f).coerceIn(0f,1f)}
+                .paneFrost(haze,CircleShape,darkSurface=true,edge=false,invalidator=invalidator))
             Canvas(Modifier.fillMaxSize()) {
                 val hubRadius=size.minDimension*.21f
                 val hubOpacity=(reveal.value*6f).coerceIn(0f,1f)
-                drawCircle(Color(0xFF171A20).copy(alpha=hubOpacity),hubRadius)
                 drawCircle(Color.White.copy(alpha=.18f*hubOpacity),hubRadius,style=Stroke(1.dp.toPx()))
             }
             Column(Modifier.align(Alignment.Center).size(centerSize).padding(7.dp).graphicsLayer {
@@ -376,5 +399,28 @@ internal fun neovimWheelAnchorRange(pane: Rect,window: Rect,diameter: Float,edge
                 }
             }
         }
+    }
+}
+
+private class WheelFrostSector(val index: Int,val slots: Int,val effect: NeovimShortcutEffect,val progress: Float): Shape {
+    override fun createOutline(size: Size,layoutDirection: LayoutDirection,density: Density): Outline {
+        val center=Offset(size.width/2,size.height/2)
+        val outer=size.minDimension/2-with(density) {1.dp.toPx()};val inner=size.minDimension*.23f
+        val step=360f/slots;val start=-90f-step/2+index*step
+        fun polar(radius: Float,degrees: Float): Offset {val rad=degrees*PI/180;return center+Offset(cos(rad).toFloat(),sin(rad).toFloat())*radius}
+        val sector=Path().apply {
+            val point=polar(inner,start);moveTo(point.x,point.y)
+            val edge=polar(outer,start);lineTo(edge.x,edge.y)
+            arcTo(Rect(center,outer),start,step,false)
+            val end=polar(inner,start+step);lineTo(end.x,end.y)
+            arcTo(Rect(center,inner),start+step,-step,false);close()
+        }
+        val offset=if(effect==NeovimShortcutEffect.FAN_OUT) polar(-with(density) {10.dp.toPx()}*(1-progress),start+step/2)-center else Offset.Zero
+        sector.asAndroidPath().transform(android.graphics.Matrix().apply {
+            setScale(wheelScale(effect,progress),wheelScale(effect,progress),center.x,center.y)
+            postRotate(wheelTurn(effect,progress),center.x,center.y);postTranslate(offset.x,offset.y)
+        })
+        val ring=Path().apply {fillType=PathFillType.EvenOdd;addOval(Rect(center,outer+with(density) {1.dp.toPx()}));addOval(Rect(center,inner))}
+        return Outline.Generic(Path.combine(PathOperation.Intersect,sector,ring))
     }
 }

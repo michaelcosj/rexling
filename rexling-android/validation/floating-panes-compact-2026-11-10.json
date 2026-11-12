@@ -1,0 +1,30 @@
+{
+  "build": 90,
+  "date": "2026-11-10",
+  "android_tests_passed": 39,
+  "jvm_tests_passed": 160,
+  "jvm_optional_skipped": 1,
+  "release_lint_packaging_verified": true,
+  "behavior": [
+    "One compact floating icon; no title or enclosing dock",
+    "Multiple panes collapse into a ProgramStack; tap toggles vertical icon fan",
+    "Choosing an item collapses the fan; active item minimizes",
+    "Single pane opens directly",
+    "Tabs 45dp, keyboard row 45dp with 4dp vertical padding",
+    "Pane indicator strip 40dp; floating button occupies its bottom-right corner",
+    "Expanded fan drawn above the Neovim assistive control"
+  ],
+  "visual_review": [
+    "Collapsed light stack",
+    "Expanded light icons"
+  ],
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 90,
+    "sha256": "0652eb7c3027e81ea2eadac84cbca2635413410faef26940211b781aa438cf2f",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  }
+}

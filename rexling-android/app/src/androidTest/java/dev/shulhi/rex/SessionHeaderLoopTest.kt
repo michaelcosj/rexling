@@ -53,7 +53,7 @@ class SessionHeaderLoopTest {
         ui.runOnIdle {items.value=sessions.take(1);current.value="linux:a"};ui.waitForIdle()
         ui.onNodeWithContentDescription("Session strip").performTouchInput {swipeRight()};ui.waitForIdle()
         ui.runOnIdle {assertTrue(selections.isEmpty());items.value=emptyList();current.value=""};ui.waitForIdle()
-        ui.onNodeWithText("Connect").assertIsDisplayed()
+        ui.onNodeWithText("Sessions").assertIsDisplayed()
     }
     @Test fun iconSwipesSwitchSessionsVerticallyAndLoopAcrossServers() {
         header(sessions,"mac:c",onSelect={})

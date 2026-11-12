@@ -25,7 +25,8 @@ import kotlin.math.roundToInt
 
 private val UploadPillText=SettingsType.row.copy(fontSize=12.sp,lineHeight=18.sp,letterSpacing=0.sp,fontWeight=FontWeight.SemiBold)
 
-@Composable internal fun ImageUploadOverlay(status: ImageUploadStatus,onRetry: ()->Unit,onCancel: ()->Unit,modifier: Modifier=Modifier,retryable: Boolean=true) {
+@Composable internal fun ImageUploadOverlay(status: ImageUploadStatus,onRetry: ()->Unit,onCancel: ()->Unit,modifier: Modifier=Modifier,retryable: Boolean=true,hazeState: dev.chrisbanes.haze.HazeState?=null) {
+    val localHaze=remember {dev.chrisbanes.haze.HazeState()}
     val scheme=MaterialTheme.colorScheme
     val failed=status.phase==ImagePhase.FAILED
     val success=status.phase==ImagePhase.SUCCESS
@@ -36,8 +37,8 @@ private val UploadPillText=SettingsType.row.copy(fontSize=12.sp,lineHeight=18.sp
     val container by animateColorAsState(if(success) Color(0xffdef2e5) else Color(0xffe5edff),tween(200),label="Upload success fill")
     val accent by animateColorAsState(if(success) green else scheme.primary,tween(200),label="Upload success ring")
     val titleColor by animateColorAsState(if(success) Color(0xff1e7143) else ink,tween(200),label="Upload success text")
-    Surface(modifier.widthIn(max=280.dp).semantics {paneTitle="Image upload"},
-        shape=RoundedCornerShape(20.dp),color=container,contentColor=ink) {
+    Surface(modifier.widthIn(max=280.dp).paneFrost(hazeState ?: localHaze,RoundedCornerShape(20.dp),edge=false,tint=container).semantics {paneTitle="Image upload"},
+        shape=RoundedCornerShape(20.dp),color=Color.Transparent,contentColor=ink) {
         Column(Modifier.animateContentSize(spring(dampingRatio=.9f,stiffness=500f),alignment=Alignment.BottomEnd)) {
             Row(Modifier.then(if(failed) Modifier.fillMaxWidth() else Modifier)
                 .padding(start=8.dp,end=if(success) 8.dp else 2.dp).heightIn(min=32.dp),

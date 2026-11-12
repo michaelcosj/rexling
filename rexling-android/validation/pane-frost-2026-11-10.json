@@ -1,0 +1,29 @@
+{
+  "build": 101,
+  "date": "2026-11-10",
+  "android_tests_passed": 43,
+  "changes": [
+    "Lighter shared frosted pane caption and floating-menu tint with 20dp blur",
+    "Minimap haze behind sharp geometry",
+    "Neovim wheel sector/hub haze with transparent neutral gap and existing animations",
+    "Public HazeEffectNode redraw bridge ties popup effects to host draws while open",
+    "Sizing notice and image-upload haze; upload retains blue/green phase colors"
+  ],
+  "checks": [
+    "16 pane chrome/minimap/floating/compositing checks passed",
+    "27 final wheel/connection/upload checks completed with zero failures in emulator TestRunner logcat; ADB output stream disconnected after USB reconnection",
+    "Live popup pixel test verifies red-to-green backdrop update, clear hub gap and capture release",
+    "Native terminal pixel blur test passed",
+    "Release lint and APK signature/native/profile/alignment checks passed"
+  ],
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 101,
+    "sha256": "6f20c32040cb35266d809e737104f265de1e55c17964fe7de5b930a0ad6f0feb",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  },
+  "device_frame_pacing_profiled": false
+}

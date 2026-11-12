@@ -1,0 +1,17 @@
+{
+  "build": 96,
+  "date": "2026-11-10",
+  "android_tests_passed": 10,
+  "release_lint_packaging_verified": true,
+  "change": "Minimap above centered program icon/title row in the existing swipe overlay",
+  "visual_review": "Stacked overlay screenshot",
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 96,
+    "sha256": "88a7e70ee0227d3e39cf4b5ce12d0146ed3afea3dcd9a1ad2ec5bf1aa767fe70",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  }
+}

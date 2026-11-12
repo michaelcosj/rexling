@@ -1,0 +1,36 @@
+{
+  "build": 94,
+  "date": "2026-11-10",
+  "entry_point": "Tabs/Panes drawer > row actions",
+  "actions": [
+    "Rename tab",
+    "Rename pane",
+    "Float pane",
+    "Dock pane",
+    "Close"
+  ],
+  "rename_reset": "Empty name restores automatic title",
+  "docking": "Choose a tiled pane in the same tab and split right or below",
+  "last_tiled_pane": "Kept docked because Rex docking requires an existing anchor",
+  "android_tests_passed": 27,
+  "jvm_tests_passed": 164,
+  "jvm_optional_skipped": 1,
+  "native_tests_passed": 45,
+  "native_optional_ignored": 15,
+  "isolated_live_test_passed": true,
+  "live_invariants": [
+    "Server labels and layout updated",
+    "Viewed pane and ownership preserved",
+    "Temporary sessions destroyed; dedicated test server stopped"
+  ],
+  "release_lint_packaging_verified": true,
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 94,
+    "sha256": "bfa788dd8f7380084aeeeabf3bad3ec94bba6112a6e11e85831804d63a5f30a1",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  }
+}

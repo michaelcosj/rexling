@@ -107,6 +107,36 @@ mod shift_enter_tests {
     }
 }
 type PreviewTask = Pin<Box<dyn Future<Output = Result<Vec<(String, Value)>>>>>;
+fn terminal_edit_call(windows:&Value,session:&str,value:&Value)->Result<(&'static str,Value)> {
+    ensure!(value["session"].as_str()==Some(session),"The selected session changed");
+    let kind=value["type"].as_str().context("terminal action required")?;
+    let window=windows.as_array().into_iter().flatten().find(|w|w["id"]==value["window"]).context("That tab is no longer available")?;
+    let id=value["id"].as_str().filter(|v|!v.is_empty()).context("terminal ID required")?;
+    if kind=="rename_tab" {
+        ensure!(window["id"]==id,"The tab changed");
+    } else {ensure!(window["blocks"].as_array().into_iter().flatten().any(|b|b["id"]==id),"That pane is no longer available");}
+    if kind=="rename_tab" || kind=="rename_pane" {
+        let label=value["label"].as_str().context("name required")?.trim();
+        ensure!(label.chars().count()<=128 && !label.chars().any(char::is_control),"Use a single-line name of at most 128 characters");
+        return Ok(if kind=="rename_tab" {("session.set_window_label",json!({"session_id":session,"window_id":id,"label":label}))}
+            else {("session.set_block_label",json!({"session_id":session,"block_id":id,"label":label}))});
+    }
+    let layout=window["layout"].as_array().context("Pane layout is unavailable")?;
+    let placement=layout.iter().find(|p|p["id"]==id).context("Pane layout changed")?;
+    let tiled:Vec<_>=layout.iter().filter(|p|p["floating"]==false).collect();
+    if kind=="float_pane" {
+        ensure!(placement["floating"]==false,"This pane is already floating");
+        ensure!(tiled.len()>1,"Keep one docked pane in this tab");
+        Ok(("session.float_block",json!({"session_id":session,"block_id":id,"bounds":[0.15,0.15,0.7,0.7]})))
+    } else {
+        ensure!(kind=="dock_pane" && placement["floating"]==true,"This pane is not floating");
+        let anchor=value["anchor"].as_str().context("Choose a docked pane")?;
+        ensure!(anchor!=id && tiled.iter().any(|p|p["id"]==anchor),"Choose an existing docked pane in this tab");
+        let direction=match value["direction"].as_str() {Some("right")=>"horizontal",Some("below")=>"vertical",_=>anyhow::bail!("Choose right or below")};
+        Ok(("session.move_block",json!({"session_id":session,"block_id":id,"anchor_block_id":anchor,"direction":direction,"side":"after","ratio":0.5})))
+    }
+}
+
 fn new_split_arguments(session: &str,anchor: &str,command: &Value)->Result<Value> {
     let direction=match command.get("direction") {
         None=>"horizontal", // Preserve older callers' Split right behavior.
@@ -1054,6 +1084,15 @@ impl Actor {
                 self.creating = false;
                 self.publish();
             }
+            "rename_tab" | "rename_pane" | "float_pane" | "dock_pane" => {
+                ensure!(self.visible && !self.paused && self.phase=="connected" && !self.creating,"Connect before editing a terminal");
+                self.refresh_view().await?;
+                let (method,args)=terminal_edit_call(&self.windows,&self.selected_session,&value)?;
+                self.error.clear();
+                // Send once: never repeat a layout mutation after an uncertain reply.
+                self.control.as_mut().context("not connected")?.call(method,args).await?;
+                self.refresh_view().await?;
+            }
             "move_tab" => {
                 ensure!(self.visible && !self.paused && self.phase=="connected" && !self.creating,"Connect before moving tabs");
                 ensure!(value["session"].as_str()==Some(self.selected_session.as_str()),"The selected session changed");
@@ -1734,6 +1773,23 @@ fn frame_value(frame: &Frame) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn terminal_edits_validate_targets_names_and_layout_before_sending() {
+        let windows=json!([{"id":"w","blocks":[{"id":"a"},{"id":"b"},{"id":"f"}],"layout":[{"id":"a","floating":false},{"id":"b","floating":false},{"id":"f","floating":true}]}]);
+        let command=|kind:&str,id:&str|json!({"type":kind,"session":"s","window":"w","id":id,"label":"  Logs 🦀  ","anchor":"a","direction":"below"});
+        let (method,args)=terminal_edit_call(&windows,"s",&command("rename_tab","w")).unwrap();assert_eq!(method,"session.set_window_label");assert_eq!(args["label"],"Logs 🦀");
+        assert_eq!(terminal_edit_call(&windows,"s",&command("rename_pane","b")).unwrap().0,"session.set_block_label");
+        assert_eq!(terminal_edit_call(&windows,"s",&command("float_pane","b")).unwrap().0,"session.float_block");
+        let (_,args)=terminal_edit_call(&windows,"s",&command("dock_pane","f")).unwrap();assert_eq!(args["anchor_block_id"],"a");assert_eq!(args["direction"],"vertical");
+        for (kind,id) in [("rename_tab","b"),("rename_pane","missing"),("float_pane","f"),("dock_pane","a")] {assert!(terminal_edit_call(&windows,"s",&command(kind,id)).is_err());}
+        assert!(terminal_edit_call(&windows,"stale",&command("rename_pane","b")).is_err());
+        let mut invalid=command("rename_pane","a");invalid["label"]=json!("bad\nname");assert!(terminal_edit_call(&windows,"s",&invalid).is_err());
+        invalid["label"]=json!("x".repeat(129));assert!(terminal_edit_call(&windows,"s",&invalid).is_err());
+        invalid["label"]=json!("");assert_eq!(terminal_edit_call(&windows,"s",&invalid).unwrap().1["label"],"");
+        let mut invalid=command("dock_pane","f");invalid["anchor"]=json!("f");assert!(terminal_edit_call(&windows,"s",&invalid).is_err());
+        let only=json!([{"id":"w","blocks":[{"id":"a"}],"layout":[{"id":"a","floating":false}]}]);assert!(terminal_edit_call(&only,"s",&command("float_pane","a")).is_err());
+    }
+
     #[test]
     fn pane_reorder_plan_moves_both_ways_and_rejects_stale_or_invalid_targets() {
         let windows=json!([{"id":"w","blocks":[{"id":"a"},{"id":"b"},{"id":"c"},{"id":"d"}]}]);
@@ -2944,6 +3000,35 @@ while True:
             }
         }
         runtime.block_on(writer.close()).unwrap();result.unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires an explicitly supplied owned Rex server"]
+    fn live_terminal_edits_rename_float_and_dock_without_changing_the_viewed_pane() {
+        let server=std::env::var("REX_TEST_SERVER").expect("set REX_TEST_SERVER");
+        let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let mut writer=runtime.block_on(Control::connect(Endpoint::new(&server,Duration::from_secs(10)).unwrap(),None,Trace::default())).unwrap();
+        let block=json!({"block":{"flavor":"com.superlogical.terminal.shell","options":{"shell":"none","command":["/bin/sh","-c","printf EDIT_READY; cat"]}}});
+        let created=runtime.block_on(writer.call("session.create",json!({"label":"rexling-pane-edit-test","initial_windows":[{"window_label":"Original","layout":{"split":{"direction":"horizontal","before":block,"after":block}}}]}))).unwrap();
+        let id=created["session_id"].as_str().unwrap();let window=&created["initial_windows"][0]["window_id"];let first=&created["initial_windows"][0]["block_ids"][0];let second=&created["initial_windows"][0]["block_ids"][1];
+        let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.block_on(writer.attach(id)).unwrap();
+            let app=Session::spawn().unwrap();app.command(json!({"type":"connect","server":server})).unwrap();wait(&app,|v|v["phase"]=="connected");
+            app.command(json!({"type":"session","id":id,"block":first})).unwrap();wait(&app,|v|v["selectedBlock"]==*first && text(v).contains("EDIT_READY"));
+            app.command(json!({"type":"take"})).unwrap();wait(&app,|v|v["controlled"]==true);
+            app.command(json!({"type":"rename_tab","session":id,"window":window,"id":window,"label":"Renamed tab"})).unwrap();
+            wait(&app,|v|v["windows"][0]["label"]=="Renamed tab");
+            app.command(json!({"type":"rename_pane","session":id,"window":window,"id":second,"label":"Build logs"})).unwrap();
+            wait(&app,|v|v["windows"][0]["blocks"].as_array().unwrap().iter().any(|b|b["id"]==*second && b["label"]=="Build logs"));
+            for (kind,floating) in [("float_pane",true),("dock_pane",false)] {
+                app.command(json!({"type":kind,"session":id,"window":window,"id":second,"anchor":first,"direction":"below"})).unwrap();
+                let changed=wait(&app,|v|v["windows"][0]["layout"].as_array().unwrap().iter().any(|p|p["id"]==*second && p["floating"]==floating));
+                assert_eq!(changed["error"],"");assert_eq!(changed["selectedBlock"],*first);assert_eq!(changed["controlled"],true);
+            }
+            let view=runtime.block_on(writer.call("session.view",json!({"session_id":id}))).unwrap();
+            assert_eq!(view["windows"][0]["label"],"Renamed tab");assert_eq!(view["windows"][0]["layers"].as_array().unwrap().len(),1);
+        }));
+        runtime.block_on(writer.call("session.destroy",json!({"session_id":id}))).unwrap();runtime.block_on(writer.close()).unwrap();result.unwrap();
     }
 
 }

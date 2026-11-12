@@ -30,7 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable internal fun ActivitySheet(sources: List<ActivitySource>,onRefresh: ()->Unit,onSelect: (ActivityTarget)->Unit,onClose: ()->Unit,onSeen: (ActivityTarget)->Unit={},onMarkAll: ()->Unit={}) {
+@Composable internal fun ActivitySheet(sources: List<ActivitySource>,onRefresh: ()->Unit,onSelect: (ActivityTarget)->Unit,onClose: ()->Unit,onSeen: (ActivityTarget)->Unit={},onMarkAll: ()->Unit={},hazeState: dev.chrisbanes.haze.HazeState?=null) {
     var filter by remember {mutableStateOf(ActivityFilter.ALL)}
     val filtered=remember(sources,filter) {sources.map {it to ActivityCatalog.records(it,filter)}}
     val panelHeight=remember(sources) {
@@ -39,10 +39,7 @@ import androidx.compose.ui.unit.dp
         (112+count.coerceIn(1,7)*72+groups.coerceAtMost(5)*24+sources.count {it.error.isNotBlank() || it.partial}*32).dp.coerceIn(208.dp,620.dp)
     }
     val scheme=MaterialTheme.colorScheme
-    RexSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=scheme.surface,
-        dragHandle={Box(Modifier.fillMaxWidth().height(16.dp),contentAlignment=Alignment.Center) {
-            Box(Modifier.width(28.dp).height(3.dp).background(scheme.outlineVariant,RoundedCornerShape(3.dp)))
-        }}) {
+    RexSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),frost=hazeState) {
         Column(Modifier.fillMaxWidth().height(panelHeight).padding(bottom=4.dp).semantics {paneTitle="Activity"}) {
             Row(Modifier.fillMaxWidth().heightIn(min=48.dp).padding(start=16.dp,end=4.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text("Activity",Modifier.weight(1f),style=SettingsType.row,fontWeight=FontWeight.Bold)
@@ -69,6 +66,8 @@ import androidx.compose.ui.unit.dp
                     if(records.isNotEmpty() || source.error.isNotBlank() || source.partial) {
                         item(key="server:${source.server.id}") {
                             Row(Modifier.fillMaxWidth().padding(top=6.dp),verticalAlignment=Alignment.CenterVertically) {
+                                ServerGlyph(source.server.icon,Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
                                 Text(source.server.label,Modifier.weight(1f),style=SettingsType.section,color=scheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
                                 Text(if(source.connected) "${records.size}" else "Offline",style=SettingsType.detail,color=scheme.onSurfaceVariant)
                             }

@@ -1,0 +1,40 @@
+{
+  "build": 105,
+  "date": "2026-11-10",
+  "surfaces": [
+    "Tabs/Panes drawer",
+    "Activity drawer",
+    "Sessions drawer",
+    "Main terminal overflow menu",
+    "Ready to type notice"
+  ],
+  "style": {
+    "drawer_tint_alpha": 0.72,
+    "drawer_blur_dp": 24,
+    "solid_rows_and_selections": true
+  },
+  "implementation": [
+    "Separate workspace backdrop covers terminal and header/menu region",
+    "Backdrop capture retained 220ms for exit animations",
+    "Drawer haze inside moving sheet content, including handle and bottom safe inset",
+    "Host redraw bridge keeps dialog/popup effects live",
+    "Explicit theme foreground preserves dark drawer contrast",
+    "Ready notice uses terminal backdrop with primary-container tint"
+  ],
+  "checks": [
+    "30 drawer, menu backdrop and Ready notice interaction checks passed",
+    "Final light/dark blur, live-update, foreground visibility and dark-text contrast check passed",
+    "Screenshots reviewed",
+    "Release lint and static signature/native/profile/alignment checks passed"
+  ],
+  "installation": {
+    "device": "100.97.157.23:35963",
+    "model": "SM-S906E",
+    "version_code": 105,
+    "sha256": "99d258b4a484c9d36fc0fd3a0c7bf5e6860015d0b1d51702154b8356cb4692be",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "wireless ADB"
+  },
+  "frame_pacing_profiled": false
+}

@@ -1,0 +1,29 @@
+{
+  "build": 93,
+  "date": "2026-11-10",
+  "icons": [
+    "Globe",
+    "Server",
+    "Cloud",
+    "MacBook",
+    "Mac mini",
+    "Mac Studio",
+    "Desktop"
+  ],
+  "entry_point": "Servers > server actions > Edit > Icon",
+  "old_or_unknown_icon_fallback": "Globe",
+  "android_tests_passed": 13,
+  "jvm_tests_passed": 162,
+  "jvm_optional_skipped": 1,
+  "release_lint_packaging_verified": true,
+  "floating_toggle": "No surrounding pill; individual icon shadows and active front-icon outline; expanded title-pill menu unchanged",
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 93,
+    "sha256": "12bf3f5bc869818dea7e43af45be63e79e17f5ef762f8d7ac0192c2a93f2a894",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  }
+}

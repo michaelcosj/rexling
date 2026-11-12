@@ -135,6 +135,12 @@ class RexModel @JvmOverloads constructor(application: Application, preferenceNam
     fun changeFontSize(size: Int) {fontSize=size.coerceIn(8,20);preferences.edit {putInt("font_size",fontSize)}}
     var appearance by mutableStateOf(runCatching {Appearance.valueOf(preferences.getString("appearance","SYSTEM")!!)}.getOrDefault(Appearance.SYSTEM))
         private set
+    internal var minimizeFloatingPanes by mutableStateOf(preferences.getBoolean("minimize_floating_panes",false))
+        private set
+    internal fun changeMinimizeFloatingPanes(value: Boolean) {
+        minimizeFloatingPanes=value
+        preferences.edit {putBoolean("minimize_floating_panes",value)}
+    }
     internal var arrowJoystickEnabled by mutableStateOf(preferences.getBoolean("arrow_joystick_enabled",true))
         private set
     internal fun changeArrowJoystick(value: Boolean) {arrowJoystickEnabled=value;preferences.edit {putBoolean("arrow_joystick_enabled",value)}}
@@ -329,8 +335,8 @@ class RexModel @JvmOverloads constructor(application: Application, preferenceNam
         else saveServer(null,"",normalized)?.let {throw IllegalArgumentException(it)}
     }.exceptionOrNull()?.message
 
-    fun saveServer(id: String?,label: String,endpoint: String): String? = runCatching {
-        val profile=ServerProfile.create(label,endpoint,id ?: java.util.UUID.randomUUID().toString())
+    fun saveServer(id: String?,label: String,endpoint: String,icon: ServerIcon?=null): String? = runCatching {
+        val profile=ServerProfile.create(label,endpoint,id ?: java.util.UUID.randomUUID().toString(),icon ?: servers.firstOrNull {it.id==id}?.icon ?: ServerIcon.GLOBE)
         require(servers.none {it.id!=profile.id && it.endpoint==profile.endpoint}) {"That server is already saved"}
         val old=servers.firstOrNull {it.id==profile.id}
         if(old!=null && old.endpoint!=profile.endpoint) {
@@ -343,6 +349,7 @@ class RexModel @JvmOverloads constructor(application: Application, preferenceNam
         val client=connection(profile)
         if(activeServerId==profile.id) {activeClient=client;client.visible=true}
         connectServer(profile.id)
+        updateActivity()
     }.exceptionOrNull()?.message
 
     fun disconnectServer(id: String) {

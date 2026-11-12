@@ -50,7 +50,7 @@ class AdaptiveTabsTest {
         repeat(4) {tab(it).assertIsDisplayed();assertInside(it)}
         assertTrue(bounds(0).width>bounds(1).width)
         val density=InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
-        repeat(4) {assertTrue("Tab $it width: ${bounds(it)}",bounds(it).width>=48*density-.5f);assertTrue("Tab $it height: ${bounds(it)}",bounds(it).height>=48*density-.5f)}
+        repeat(4) {assertTrue("Tab $it width: ${bounds(it)}",bounds(it).width>=48*density-.5f);assertTrue("Tab $it height: ${bounds(it)}",bounds(it).height>=44*density-.5f)}
         ui.onNodeWithText("Claude").assertDoesNotExist()
         val dock=ui.onNodeWithTag("Test dock").fetchSemanticsNode().boundsInRoot
         val eye=ui.onNodeWithContentDescription("Activity").fetchSemanticsNode().boundsInRoot

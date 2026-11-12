@@ -30,13 +30,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 
 @Composable internal fun TerminalCarousel(blocks: List<BlockItem>,selectedBlock: String,liveBlock: String,
     liveScreen: TerminalScreen?,frames: Map<String,TerminalScreen>,programs: Map<String,ProgramIdentity>,controlled: Boolean,fontSize: Float,
     onInput: (String)->Unit,onScroll: (Int)->Unit,onWheel: (Int,Int,Int,Int,Int)->Unit,onActivate: ()->Unit,onBottom: ()->Unit,onDimensions: (Int,Int)->Unit,onSelect: (String)->Unit,onPanes: ()->Unit,
     onView: (TerminalView)->Unit,modifier: Modifier=Modifier,bindLiveView: ((String,TerminalView)->Boolean)?=null,
-    onMouseClick: (Int,Int,Int,Int)->Unit={_,_,_,_->},mouseTarget: ()->String={""},onImage: (android.net.Uri,()->Unit)->Boolean={_,release->release();false},onPaste: ()->Boolean={false},imageTarget: ()->String=mouseTarget,
+    onMouseClick: (Int,Int,Int,Int)->Unit={_,_,_,_->},mouseTarget: ()->String={""},onImage: (android.net.Uri,()->Unit)->Boolean={_,release->release();false},onPaste: ()->Boolean={false},imageTarget: ()->String=mouseTarget,bottomControlsInset: androidx.compose.ui.unit.Dp=0.dp,paneLayout: List<PanePlacement> = emptyList(),titles: Map<String,String> = emptyMap(),directories: Map<String,String> = emptyMap(),hazeState: HazeState?=null,captureBackdrop: Boolean=false,
     padding: TerminalPadding=TerminalPadding.NORMAL,extendPadding: Boolean=true) {
+    val switchLayout=remember(paneLayout,blocks) {paneLayout.filter {p->blocks.any {it.id==p.id}}.sortedBy {it.layer}}
+    val hasMinimap=blocks.all {b->switchLayout.any {it.id==b.id}}
+    val localHaze=remember {HazeState()}
+    val haze=hazeState ?: localHaze
+    // Our padding preference sets the pager strip; a floating dock needs room of its own.
+    val pagerHeight=padding.pagedBottom.coerceAtLeast(10)
+    val bottomPadding=maxOf(if(blocks.size>1) pagerHeight else padding.bottom,if(bottomControlsInset>0.dp) 36 else 0)
     val palette=LocalTerminalPalette.current
     val backdrop=MaterialTheme.colorScheme.background
     val scope=rememberCoroutineScope()
@@ -95,6 +104,8 @@ import kotlin.math.roundToInt
         // Two-pane rings share one neighbor: render it on the gesture side so
         // each real pane keeps one AndroidView and one stable key.
         val offsets=when(blocks.size) {0->emptyList();1->listOf(0);2->listOf(0,if(drag>0) -1 else 1);else->listOf(-1,0,1)}
+        val showSwitch=(dragging || settling || toast) && blocks.size>1 && blocks.getOrNull(candidate)!=null
+        Box(Modifier.fillMaxSize().then(if(showSwitch || captureBackdrop) Modifier.hazeSource(haze) else Modifier)) {
         for(offset in offsets) {
             val i=Math.floorMod(index+offset,blocks.size)
             val block=blocks[i]
@@ -113,7 +124,7 @@ import kotlin.math.roundToInt
                             factory={TerminalView(it)},modifier=Modifier.fillMaxSize().clipToBounds(),
                             update={view ->
                                 view.onDimensions=if(center && block.id==liveBlock) onDimensions else {_,_->}
-                                view.setTerminalPaddingDp(padding.horizontal,padding.top,if(blocks.size>1) padding.pagedBottom else padding.bottom)
+                                view.setTerminalPaddingDp(padding.horizontal,padding.top,bottomPadding)
                                 view.extendPadding=extendPadding
                                 view.palette=palette;view.textSp=fontSize
                                 if(block.id!=liveBlock || bindLiveView?.invoke(block.id,view)!=true) view.screen=frame
@@ -144,7 +155,7 @@ import kotlin.math.roundToInt
                         }
                     }
                     if(center && (frame?.scroll?.below ?: 0)>0) {
-                        Text("↓ Latest",Modifier.align(Alignment.BottomEnd).padding(end=12.dp,bottom=if(blocks.size>1) 64.dp else 10.dp)
+                        Text("↓ Latest",Modifier.align(Alignment.BottomEnd).padding(end=12.dp,bottom=(if(blocks.size>1) if(hasMinimap) 136.dp else 96.dp else 10.dp)+bottomControlsInset)
                             .clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surface)
                             .clickable(role=Role.Button,onClick=onBottom).padding(horizontal=12.dp,vertical=7.dp),
                             fontSize=11.sp,color=MaterialTheme.colorScheme.primary)
@@ -153,23 +164,33 @@ import kotlin.math.roundToInt
                 }
             }
         }
+        }
         if(blocks.size>1) {
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(14.dp)
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(pagerHeight.dp)
                 .clickable(role=Role.Button,onClick=onPanes)
                 .semantics {contentDescription="Pane position indicator";stateDescription="Pane ${candidate+1} of ${blocks.size}"},contentAlignment=Alignment.Center) {
                 PanePositionIndicator(index,blocks.size,offset={-drag/stride})
             }
         }
-        if((dragging || settling || toast) && blocks.size>1 && blocks.getOrNull(candidate)!=null) {
-            Row(Modifier.align(Alignment.BottomCenter).padding(bottom=20.dp)
-                .widthIn(max=(maxWidth-32.dp).coerceIn(80.dp,240.dp)).heightIn(min=36.dp)
-                .clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.surface)
-                .semantics {contentDescription="Pane switch indicator";stateDescription=blocks[candidate].id}
-                .padding(horizontal=12.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    val program=programs[blocks[candidate].id] ?: ProgramIdentity.Loading
-                    ProgramStack(listOf(program),0)
-                    Text(program.paneTitle(blocks[candidate].label),
-                        fontWeight=FontWeight.SemiBold,fontSize=13.sp,lineHeight=18.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        if(showSwitch) {
+            Column(Modifier.align(Alignment.BottomCenter).padding(bottom=(pagerHeight+6).dp)
+                .widthIn(max=(maxWidth-32.dp).coerceIn(80.dp,240.dp))
+                .semantics {contentDescription="Pane switch indicator";stateDescription=blocks[candidate].id},
+                horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                    if(hasMinimap) PaneSwitchMinimap(switchLayout,blocks[candidate].id,Modifier.size(56.dp,36.dp),hazeState=haze)
+                    Row(Modifier.paneFrost(haze,RoundedCornerShape(13.dp)).semantics {contentDescription="Pane switch caption"}.padding(horizontal=6.dp,vertical=4.dp),
+                        verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(9.dp)) {
+                        val block=blocks[candidate]
+                        val program=programs[block.id] ?: ProgramIdentity.Loading
+                        PaneProgramTile(program,Modifier.size(22.dp,18.dp),false,0f)
+                        Column(Modifier.weight(1f,fill=false)) {
+                            Text(program.paneTitle(block.label,titles[block.id].orEmpty()),
+                                fontFamily=MonoUi,fontWeight=FontWeight.Bold,fontSize=12.sp,lineHeight=18.sp,letterSpacing=0.sp,
+                                style=androidx.compose.ui.text.TextStyle(platformStyle=androidx.compose.ui.text.PlatformTextStyle(includeFontPadding=false)),maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Text(directories[block.id].orEmpty(),fontFamily=MonoUi,fontSize=10.sp,lineHeight=14.sp,letterSpacing=0.sp,maxLines=1,
+                                overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
             }
         }
     }

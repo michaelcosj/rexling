@@ -51,11 +51,21 @@ class SessionSwitcherTest {
             SessionSwitcher(targets,targets[0].key,targets[1].key,true,"","",{},{_,name->renamed=name;true},{selected++},{},{created++})
         }}
         capture("sessions-compact-light.png")
-        ui.onNodeWithText("New").performClick()
+        ui.onNodeWithText("New session").performClick()
         ui.onNodeWithContentDescription("Session actions for ShipPDF on Shulhi MBP").performClick()
         ui.onNodeWithText("Rename session").performClick()
         ui.onNode(hasSetTextAction() and hasText("ShipPDF")).performTextReplacement("New project")
         ui.onNodeWithText("Save").performClick()
         ui.runOnIdle {assertEquals(1,created);assertEquals(0,selected);assertEquals("New project",renamed)}
     }
+    @Test fun emptyDrawerStillOffersNewSession() {
+        var created=0
+        ui.setContent {RexTheme(false,ThemeCatalog.defaults[1]) {
+            SessionSwitcher(emptyList(),"","",true,"","",{},{_,_->false},{},{},{created++})
+        }}
+        ui.onNodeWithText("No sessions yet").assertIsDisplayed()
+        ui.onNodeWithText("New session").assertIsEnabled().performClick()
+        ui.runOnIdle {assertEquals(1,created)}
+    }
+
 }

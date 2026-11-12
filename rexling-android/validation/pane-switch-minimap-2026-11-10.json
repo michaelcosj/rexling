@@ -1,0 +1,25 @@
+{
+  "build": 95,
+  "date": "2026-11-10",
+  "android_tests_passed": 10,
+  "release_lint_packaging_verified": true,
+  "behavior": [
+    "Actual server geometry beside pane-switch icon and title",
+    "Destination pane highlighted during swipe and post-switch toast",
+    "Map filtered to swipeable panes; hidden when layout incomplete",
+    "No terminal content resize or extra fixed indicator"
+  ],
+  "visual_review": [
+    "Combined icon/title/minimap overlay",
+    "Light and dark map geometry/highlight"
+  ],
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 95,
+    "sha256": "42e157af6dda601aaf0c0dc2553ccef73cab7182325fd3be60fe73e8d68f5db0",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  }
+}
