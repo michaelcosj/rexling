@@ -482,11 +482,6 @@ impl Predictor {
             scroll_offset: frame.scroll_offset,
             scroll_visible: frame.scroll_visible,
             input_flags: frame.input_flags,
-            images: frame.images.clone(),
-            image_generation: frame.image_generation,
-            cell_px: frame.cell_px,
-            animation_delay_ms: frame.animation_delay_ms,
-            image_pixels: frame.image_pixels.clone(),
         })
     }
 }
@@ -547,11 +542,6 @@ mod tests {
             scroll_offset: scroll,
             scroll_visible: ROWS as u64,
             input_flags: 0,
-            images: Arc::from([]),
-            image_generation: 0,
-            cell_px: (0, 0),
-            animation_delay_ms: None,
-            image_pixels: Arc::from([]),
         })
     }
 
@@ -902,11 +892,6 @@ mod tests {
                 scroll_offset: self.scroll_offset,
                 scroll_visible: self.scroll_visible,
                 input_flags: self.input_flags,
-                images: self.images.clone(),
-                image_generation: self.image_generation,
-                cell_px: self.cell_px,
-                animation_delay_ms: self.animation_delay_ms,
-                image_pixels: self.image_pixels.clone(),
             }
         }
     }

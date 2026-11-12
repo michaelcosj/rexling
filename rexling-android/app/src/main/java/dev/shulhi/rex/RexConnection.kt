@@ -101,7 +101,6 @@ internal class RexConnection(application: Application, private val scope: Corout
         val current=state.value
         val live=current.selectedBlock.ifBlank {if(current.phase=="preview") "preview" else ""}
         if(block!=live) return false
-        cellPixels=view.cellPixels
         view.onCursorTap={
             val active=state.value
             // Program identity must be live, not the last-known chrome cache.
@@ -173,8 +172,6 @@ internal class RexConnection(application: Application, private val scope: Corout
     private var handle = 0L
     private var resizeJob: Job? = null
     private var lastSize = 0 to 0
-    /** Last device-pixel cell size of the live view; sent with resizes for kitty graphics. */
-    @Volatile private var cellPixels = 0 to 0
     @Volatile private var foreground = true
     @Volatile private var closed = false
     @Volatile var visible = true
@@ -430,8 +427,7 @@ internal class RexConnection(application: Application, private val scope: Corout
         if(!restoreWorkspace && activation.shouldTake(current,navigationRequest,visible && foreground,lastSize)) sendTake(current)
     }
     private fun sendTake(current: AppState) = command("take","session" to current.selectedSession,"block" to current.selectedBlock,
-        "navigationId" to current.navigationId,"columns" to lastSize.first,"rows" to lastSize.second,
-        "cellWidth" to cellPixels.first,"cellHeight" to cellPixels.second)
+        "navigationId" to current.navigationId,"columns" to lastSize.first,"rows" to lastSize.second)
     fun takeControl() {
         val current=state.value
         if(visible && current.connected && !current.creating && !navigationRequest.pending && current.selectedBlock.isNotBlank()) {
@@ -490,7 +486,7 @@ internal class RexConnection(application: Application, private val scope: Corout
         resizeJob = scope.launch {
             delay(150)
             command("resize", "session" to current.selectedSession,"block" to current.selectedBlock,"navigationId" to current.navigationId,
-                "columns" to size.first, "rows" to size.second,"cellWidth" to cellPixels.first,"cellHeight" to cellPixels.second)
+                "columns" to size.first, "rows" to size.second)
         }
     }
     fun applySize() = resize(lastSize.first.coerceAtLeast(1), lastSize.second.coerceAtLeast(1))
