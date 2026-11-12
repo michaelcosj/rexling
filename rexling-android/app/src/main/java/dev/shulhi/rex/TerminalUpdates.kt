@@ -11,7 +11,7 @@ internal class TerminalUpdates {
         require(bytes.size in 17..134217728) {"Invalid terminal packet size"}
         val data=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         val version=data.int
-        require(version==0x31545852 || version==0x32545852 || version==0x33545852 || version==0x34545852) {"Unsupported terminal packet"}
+        require(version==0x31545852 || version==0x32545852 || version==0x33545852 || version==0x34545852 || version==0x35545852) {"Unsupported terminal packet"}
         val nextRevision=data.long;require(nextRevision>revision)
         fun text(): String {val n=data.int;require(n>=0 && n<=data.remaining());val raw=ByteArray(n);data.get(raw);return raw.toString(Charsets.UTF_8)}
         val metadata=text()
@@ -26,11 +26,13 @@ internal class TerminalUpdates {
                 val scroll=TerminalScroll(data.long,data.long,data.long)
                 val inputFlags=if(version>=0x32545852) data.get().toInt() and 0xff else 0
                 if(flag==2) require(previous!=null && previous.columns==columns && previous.rows==rows) {"Missing terminal delta base"}
-                val lines=if(flag==2) previous!!.lines.toMutableList() else MutableList<List<TerminalCell>>(rows){emptyList()}
+                // RXT5: rows moved by `shift` (positive: up) before changed rows apply.
+                val shift=if(version>=0x35545852) data.short.toInt() else 0
+                require(shift==0 || (flag==2 && kotlin.math.abs(shift)<rows)) {"Invalid terminal row shift"}
+                val lines=if(flag==2) shifted(previous!!.lines,shift) else MutableList<List<TerminalCell>>(rows){emptyList()}
                 val changed=data.short.toInt() and 0xffff;require(changed<=rows)
                 val seen=HashSet<Int>()
-                repeat(changed) {
-                    val row=data.short.toInt() and 0xffff;require(row<rows && seen.add(row))
+                fun readRow(row: Int): List<TerminalCell> {
                     val count=data.short.toInt() and 0xffff;require(count<=columns)
                     val cells=List(count) {
                         val col=data.short.toInt() and 0xffff;val width=data.get().toInt() and 0xff
@@ -38,7 +40,7 @@ internal class TerminalUpdates {
                         require(col<columns && width<=2)
                         TerminalCell(col,row,text(),foreground,background,attrs,width)
                     }
-                    lines[row]=if(version>=0x33545852) {
+                    return if(version>=0x33545852) {
                         val n=data.short.toInt() and 0xffff;require(n<=columns)
                         var end=0
                         val links=List(n) {
@@ -55,9 +57,23 @@ internal class TerminalUpdates {
                         }
                     } else cells
                 }
+                repeat(changed) {
+                    val row=data.short.toInt() and 0xffff;require(row<rows && seen.add(row))
+                    lines[row]=readRow(row)
+                }
+                if(flag==2 && shift!=0) {
+                    // Rows uncovered by the shift must be among the changed rows.
+                    val uncovered=if(shift>0) (rows-shift until rows) else (0 until -shift)
+                    require(uncovered.all {it in seen}) {"Missing rows after terminal shift"}
+                }
                 if(flag==3) require(changed==rows)
+                var above=emptyList<List<TerminalCell>>();var below=emptyList<List<TerminalCell>>()
+                if(version>=0x35545852) {
+                    val a=data.get().toInt() and 0xff;require(a<=16);above=List(a) {readRow(-1)}
+                    val b=data.get().toInt() and 0xff;require(b<=16);below=List(b) {readRow(rows)}
+                }
                 var cw=8;var ch=16;var placements=emptyList<TerminalImagePlacement>()
-                if(version==0x34545852) {
+                if(version>=0x34545852) {
                     cw=data.int;ch=data.int;require(cw>0 && ch>0)
                     val images=if(flag==2) previous!!.images.associate {Pair(it.image.id,it.image.generation) to it.image}.toMutableMap() else mutableMapOf()
                     val assets=data.short.toInt() and 0xffff;require(assets<=4096)
@@ -83,12 +99,12 @@ internal class TerminalUpdates {
                         TerminalImagePlacement(image,layer,z,col,row,ox,oy,w,h,sx,sy,sw,sh)
                     }.sortedWith(compareBy({it.layer},{it.z}))
                 }
-                TerminalScreen(columns,rows,x.takeIf {it>=0},y.takeIf {it>=0},fg,bg,lines.flatten(),scroll,lines,inputFlags,placements,cw,ch)
+                TerminalScreen(columns,rows,x.takeIf {it>=0},y.takeIf {it>=0},fg,bg,lines.flatten(),scroll,lines,inputFlags,placements,cw,ch,above,below)
             }
             else->error("Invalid terminal frame flag $flag")
         }
         val frame=readFrame(state.screen)
-        if(version==0x34545852) {
+        if(version>=0x34545852) {
             val count=data.short.toInt() and 0xffff;require(count<=32)
             val previews=mutableMapOf<String,TerminalScreen>()
             repeat(count) {val id=text();require(id.isNotEmpty() && !previews.containsKey(id));previews[id]=readFrame(null) ?: error("Missing preview frame")}
@@ -98,5 +114,13 @@ internal class TerminalUpdates {
         next=next.copy(revision=nextRevision,screen=frame)
         state=next;revision=nextRevision
         return next
+    }
+    /** Move rows by [shift] (positive: content moved up), re-tagging each cell's row. */
+    private fun shifted(lines: List<List<TerminalCell>>,shift: Int): MutableList<List<TerminalCell>> {
+        if(shift==0) return lines.toMutableList()
+        return MutableList(lines.size) {y->
+            val from=y+shift
+            if(from in lines.indices) lines[from].let {row->if(row.isEmpty() || row[0].y==y) row else row.map {it.copy(y=y)}} else emptyList()
+        }
     }
 }

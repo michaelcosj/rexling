@@ -486,6 +486,8 @@ impl Predictor {
             image_cell_width: frame.image_cell_width,
             image_cell_height: frame.image_cell_height,
             images: frame.images.clone(),
+            above: frame.above.clone(),
+            below: frame.below.clone(),
         })
     }
 }
@@ -550,6 +552,8 @@ mod tests {
             image_cell_width: 0,
             image_cell_height: 0,
             images: Vec::new(),
+            above: Vec::new(),
+            below: Vec::new(),
         })
     }
 
@@ -904,6 +908,8 @@ mod tests {
                 image_cell_width: self.image_cell_width,
                 image_cell_height: self.image_cell_height,
                 images: self.images.clone(),
+                above: self.above.clone(),
+                below: self.below.clone(),
             }
         }
     }

@@ -26,7 +26,11 @@ struct RawFrame {
     scroll_offset: u64,
     scroll_visible: u64,
     input_flags: u8,
+    overscan_above: u16,
+    overscan_below: u16,
 }
+const ROW_ABOVE: u16 = 0xFF00;
+const ROW_BELOW: u16 = 0xFE00;
 unsafe extern "C" {
     fn rp_new(cols: u16, rows: u16, out: *mut *mut c_void) -> i32;
     fn rp_decode(bytes: *const u8, len: usize, out: *mut *mut c_void, offset: *mut usize) -> i32;
@@ -55,6 +59,23 @@ unsafe extern "C" {
         callback: CellFn,
         userdata: *mut c_void,
     ) -> i32;
+}
+/// Move overscan cells (tagged by the shim) out of the grid into their own rows.
+fn split_overscan(cells: &mut Vec<Cell>, above: u16, below: u16) -> (Vec<Vec<Cell>>, Vec<Vec<Cell>>) {
+    let mut over: Vec<Vec<Cell>> = (0..above).map(|_| Vec::new()).collect();
+    let mut under: Vec<Vec<Cell>> = (0..below).map(|_| Vec::new()).collect();
+    cells.retain(|cell| {
+        let (tag, k) = (cell.y & 0xFF00, cell.y & 0x00FF);
+        let row = match tag {
+            ROW_ABOVE if k >= 1 && k <= above => over.get_mut((above - k) as usize),
+            ROW_BELOW if k < below => under.get_mut(k as usize),
+            ROW_ABOVE | ROW_BELOW => None,
+            _ => return true,
+        };
+        if let Some(row) = row {row.push(Cell { y: 0, ..cell.clone() });}
+        false
+    });
+    (over, under)
 }
 pub(crate) fn check(code: i32, action: &str) -> Result<()> {
     ensure!(code == 0, "libghostty {action} failed (result {code})");
@@ -88,6 +109,11 @@ pub struct Frame {
     pub input_flags: u8,
     pub next_image_delay_ms:Option<u64>,
     pub image_cell_width:u32,pub image_cell_height:u32,pub images:Vec<crate::graphics::Placement>,
+    /// Scrollback rows just above the viewport, top to bottom (nearest last),
+    /// for smooth sub-line scrolling. Cells keep `y` 0 within their row.
+    pub above: Vec<Vec<Cell>>,
+    /// Rows just below the viewport while scrolled back, top to bottom.
+    pub below: Vec<Vec<Cell>>,
 }
 impl Frame {
     pub fn text(&self) -> String {
@@ -345,7 +371,8 @@ impl Terminal {
             },
             "render state",
         )?;
-        let (image_cell_width,image_cell_height,images)=self.images.frame(self.handle.as_ptr())?;
+        let (above, below) = split_overscan(&mut cells, raw.overscan_above, raw.overscan_below);
+        let (image_cell_width,image_cell_height,images)=self.images.frame(self.handle.as_ptr(),raw.rows)?;
         let next_image_delay_ms=next_image_delay_ms.filter(|_|!images.is_empty());
         Ok(Frame {
             columns: raw.columns,
@@ -358,7 +385,7 @@ impl Terminal {
             scroll_offset: raw.scroll_offset,
             scroll_visible: raw.scroll_visible,
             input_flags: raw.input_flags,
-            cells,image_cell_width,image_cell_height,images,next_image_delay_ms,
+            cells,image_cell_width,image_cell_height,images,next_image_delay_ms,above,below,
         })
     }
     fn theme(&mut self, event: &Value) -> Result<()> {
@@ -490,6 +517,28 @@ impl Replica {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn overscan_rows_carry_scrollback_around_the_viewport_for_smooth_scrolling() {
+        let mut terminal = Terminal::new(10, 3).unwrap();
+        for i in 0..20 {terminal.write(format!("L{i:02}\r\n").as_bytes()).unwrap();}
+        terminal.write(b"END").unwrap();
+        let bottom = terminal.frame().unwrap();
+        // At the bottom: history above, nothing below; cells stay in the grid.
+        assert_eq!(bottom.below.len(), 0);
+        assert!(!bottom.above.is_empty() && bottom.above.len() <= 4);
+        let line = |row: &Vec<Cell>| row.iter().map(|c| c.text.as_str()).collect::<String>();
+        assert_eq!(line(bottom.above.last().unwrap()).trim(), "L17", "nearest row above the visible L18, L19, END");
+        assert!(bottom.cells.iter().all(|c| c.y < 3));
+        assert!(bottom.above.iter().flatten().all(|c| c.y == 0));
+        assert!(bottom.text().contains("END"));
+        // Scrolled back: rows below the viewport too, still in order.
+        terminal.scroll_viewport(-5);
+        let back = terminal.frame().unwrap();
+        assert!(!back.below.is_empty());
+        let first_visible: String = back.cells.iter().filter(|c| c.y == 0).map(|c| c.text.as_str()).collect();
+        let nearest_above = line(back.above.last().unwrap());
+        assert_eq!(nearest_above.trim()[1..].parse::<u32>().unwrap() + 1, first_visible.trim()[1..].parse::<u32>().unwrap());
+    }
     #[test]
     fn restored_scrollback_scrolls_locally_and_keeps_new_output_anchored() {
         let mut original = Terminal::new(30, 4).unwrap();

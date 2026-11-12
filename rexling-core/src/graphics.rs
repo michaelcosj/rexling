@@ -184,7 +184,9 @@ pub(crate) struct Images {
     placements: Vec<Placement>,
 }
 impl Images {
-    pub fn frame(&mut self, terminal: *mut c_void) -> Result<(u32, u32, Vec<Placement>)> {
+    /// `rows` is the viewport height: placements wholly inside the overscan
+    /// rows (captured for smooth scrolling) aren't drawn, matching no overscan.
+    pub fn frame(&mut self, terminal: *mut c_void, rows: u16) -> Result<(u32, u32, Vec<Placement>)> {
         self.placements.clear();
         let mut cw = 0;
         let mut ch = 0;
@@ -258,6 +260,11 @@ impl Images {
             },
             "image render state",
         )?;
+        let cell_height = ch.max(1) as i64;
+        self.placements.retain(|p| {
+            let cells = (i64::from(p.oy) + i64::from(p.height) + cell_height - 1) / cell_height;
+            i64::from(p.row) + cells > 0 && i64::from(p.row) < i64::from(rows)
+        });
         let visible: std::collections::HashSet<_> = self
             .placements
             .iter()

@@ -11,7 +11,15 @@ typedef struct {
   uint8_t cursor_visible, foreground[3], background[3];
   uint64_t scroll_total, scroll_offset, scroll_visible;
   uint8_t input_flags;
+  uint16_t overscan_above, overscan_below;
 } RpFrame;
+/* Overscan rows keep a distinct y above any real grid row:
+   RP_ABOVE|k is k rows over the viewport (k>=1), RP_BELOW|k is k rows
+   under its last row (k>=0). Rust moves them out of Frame::cells. */
+#define RP_ABOVE 0xFF00
+#define RP_BELOW 0xFE00
+/* Spare rows above and below the viewport for smooth sub-line scrolling. */
+#define RP_OVERSCAN 4
 typedef struct {
   GhosttyTerminal terminal;
   GhosttyRenderState render;
@@ -82,6 +90,8 @@ static int configure(RpTerminal *t) {
   }
   // No WRITE_PTY callback: the server's canonical terminal answers queries.
   if (r == 0) r = ghostty_render_state_new(NULL, &t->render);
+  GhosttyRenderStateOverscan overscan={.above=RP_OVERSCAN,.below=RP_OVERSCAN};
+  if (r == 0) r = ghostty_render_state_set(t->render, GHOSTTY_RENDER_STATE_OPT_OVERSCAN, &overscan);
   if (r == 0) r = ghostty_render_state_row_iterator_new(NULL, &t->rows);
   if (r == 0) r = ghostty_render_state_row_cells_new(NULL, &t->cells);
   return r;
@@ -228,18 +238,26 @@ int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
   frame->scroll_offset=scrollbar.offset;
   frame->scroll_visible=scrollbar.len;
   r=rp_input_flags(t,&frame->input_flags);if(r!=0)return r;
+  GhosttyRenderStateOverscan captured={0};
+  GET(GHOSTTY_RENDER_STATE_DATA_OVERSCAN,&captured);
+  frame->overscan_above=captured.above;frame->overscan_below=captured.below;
   frame->cursor_x=cursor.viewport_x; frame->cursor_y=cursor.viewport_y;
   // Bit 0: drawn cursor. Bit 1: position known even when hidden, as TUIs park it for IMEs.
   frame->cursor_visible=(cursor.visible && cursor.viewport_has_value) | (cursor.viewport_has_value<<1);
   memcpy(frame->foreground,&colors.foreground,3);
   memcpy(frame->background,&colors.background,3);
   GET(GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,&t->rows);
-  uint16_t y=0;
   uint32_t *graphemes=NULL; size_t capacity=0;
   uint8_t *uri=NULL; size_t uri_capacity=0;
   while (ghostty_render_state_row_iterator_next(t->rows)) {
     r=ghostty_render_state_row_get(t->rows,GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,&t->cells);
     if(r!=0)break;
+    int32_t viewport_y=0;
+    r=ghostty_render_state_row_get(t->rows,GHOSTTY_RENDER_STATE_ROW_DATA_VIEWPORT_Y,&viewport_y);if(r!=0)break;
+    bool overscan=viewport_y<0 || viewport_y>=frame->rows;
+    if(viewport_y<-RP_OVERSCAN || viewport_y>=frame->rows+RP_OVERSCAN) continue;
+    uint16_t y=viewport_y<0 ? (uint16_t)(RP_ABOVE|(uint16_t)(-viewport_y))
+        : (overscan ? (uint16_t)(RP_BELOW|(uint16_t)(viewport_y-frame->rows)) : (uint16_t)viewport_y);
     GhosttyRow raw_row=0; bool wrapped=false,continuation=false;
     r=ghostty_render_state_row_get(t->rows,GHOSTTY_RENDER_STATE_ROW_DATA_RAW,&raw_row);if(r!=0)break;
     r=ghostty_row_get(raw_row,GHOSTTY_ROW_DATA_WRAP,&wrapped);if(r!=0)break;
@@ -288,7 +306,7 @@ int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
           (wide==GHOSTTY_CELL_WIDE_SPACER_TAIL || wide==GHOSTTY_CELL_WIDE_SPACER_HEAD ? 0 : 1);
       size_t uri_len=0; bool has_link=false;
       r=ghostty_cell_get(raw,GHOSTTY_CELL_DATA_HAS_HYPERLINK,&has_link);if(r!=0)goto done;
-      if(has_link && width>0) {
+      if(has_link && width>0 && !overscan) {
         GhosttyGridRef ref={0};
         GhosttyPoint point={.tag=GHOSTTY_POINT_TAG_VIEWPORT,.value.coordinate={.x=x,.y=y}};
         r=ghostty_terminal_grid_ref(t->terminal,point,&ref);if(r!=0)goto done;
@@ -304,7 +322,6 @@ int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
       }
       callback(userdata,x++,y,graphemes,count,(const uint8_t *)&fg,(const uint8_t *)&bg,flags,width,uri,uri_len);
     }
-    y++;
   }
 done:
   free(graphemes);free(uri);

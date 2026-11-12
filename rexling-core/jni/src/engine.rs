@@ -363,6 +363,13 @@ impl Actor {
                         else {self.commands.clear();if let Err(error)=self.release_selected().await {self.recover(error);}self.publish();}
                         continue;
                     }
+                    // Local viewport scrolling never touches the server: apply it straight
+                    // away instead of queueing behind input and its acknowledgements.
+                    // render_at already paces frames to at most one per 16 ms.
+                    if value["type"]=="scroll" {
+                        self.execute_command(value).await;
+                        continue;
+                    }
                     if matches!(value["type"].as_str(),Some("connect"|"retry"|"network"|"resume"|"activity")) {maintenance_at=tokio::time::Instant::now();}
                     if matches!(value["type"].as_str(),Some("monitor"|"connect"|"disconnect"|"pause"|"network"|"retry")) {
                         self.commands.clear();self.execute_command(value).await;
