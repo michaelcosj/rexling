@@ -14,6 +14,7 @@ replace licenses or grant trademark rights for the following upstream material.
 | Rex theme color projection | Original provenance and source hash retained in `rexling-android/app/src/main/assets/themes/SOURCE.json`; Apache 2.0 is not asserted over upstream Rex material |
 | OkHttp / Okio test fixtures (not shipped in the release app) | Apache 2.0; pinned OkHttp 4.12.0 and its resolved Okio dependency in the Gradle manifests and Maven metadata |
 | Haze backdrop blur | Apache 2.0; Chris Banes and contributors, pinned to 1.5.4; https://github.com/chrisbanes/haze |
+| PNG decoder (`png` Rust crate) | MIT OR Apache 2.0; pinned in `rexling-core/Cargo.lock`; retained `assets/licenses/PNG_LICENSE-MIT.txt` and `PNG_LICENSE-APACHE.txt` |
 | Rust / AndroidX / other dependencies | Their respective upstream licenses; pinned dependency versions in Cargo.lock and the Gradle manifests |
 
 The launcher artwork supplied for Rexling is retained with its preparation

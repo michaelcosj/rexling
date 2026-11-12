@@ -16,8 +16,8 @@ internal class TerminalUpdates {
         fun text(): String {val n=data.int;require(n>=0 && n<=data.remaining());val raw=ByteArray(n);data.get(raw);return raw.toString(Charsets.UTF_8)}
         val metadata=text()
         var next=if(metadata.isNotEmpty()) AppState.parse(metadata,state.activity) else state.copy(previewFrames=emptyMap())
-        val frame=when(val flag=data.get().toInt()) {
-            0->state.screen
+        fun readFrame(previous: TerminalScreen?): TerminalScreen? = when(val flag=data.get().toInt()) {
+            0->previous
             1->null
             2,3->{
                 val columns=data.short.toInt() and 0xffff;val rows=data.short.toInt() and 0xffff
@@ -25,7 +25,6 @@ internal class TerminalUpdates {
                 val x=data.int;val y=data.int;val fg=data.int;val bg=data.int
                 val scroll=TerminalScroll(data.long,data.long,data.long)
                 val inputFlags=if(version>=0x32545852) data.get().toInt() and 0xff else 0
-                val previous=state.screen
                 if(flag==2) require(previous!=null && previous.columns==columns && previous.rows==rows) {"Missing terminal delta base"}
                 val lines=if(flag==2) previous!!.lines.toMutableList() else MutableList<List<TerminalCell>>(rows){emptyList()}
                 val changed=data.short.toInt() and 0xffff;require(changed<=rows)
@@ -57,35 +56,47 @@ internal class TerminalUpdates {
                     } else cells
                 }
                 if(flag==3) require(changed==rows)
-                TerminalScreen(columns,rows,x.takeIf {it>=0},y.takeIf {it>=0},fg,bg,lines.flatten(),scroll,lines,inputFlags,state.screen?.images ?: TerminalImages.None)
+                var cw=8;var ch=16;var placements=emptyList<TerminalImagePlacement>()
+                if(version==0x34545852) {
+                    cw=data.int;ch=data.int;require(cw>0 && ch>0)
+                    val images=if(flag==2) previous!!.images.associate {Pair(it.image.id,it.image.generation) to it.image}.toMutableMap() else mutableMapOf()
+                    val assets=data.short.toInt() and 0xffff;require(assets<=4096)
+                    val newKeys=HashSet<Pair<Long,Long>>()
+                    var total=0L
+                    repeat(assets) {
+                        val id=data.int.toLong() and 0xffffffffL;val generation=data.long
+                        val w=data.int;val h=data.int;val n=data.int
+                        require(w in 1..8192 && h in 1..8192 && n.toLong()==w.toLong()*h*4 && n<=data.remaining())
+                        total+=n;require(total<=64*1024*1024)
+                        val key=Pair(id,generation);require(newKeys.add(key))
+                        val bytes=ByteArray(n);data.get(bytes);images[key]=TerminalImage(id,generation,w,h,bytes)
+                    }
+                    val count=data.short.toInt() and 0xffff;require(count<=4096)
+                    placements=List(count) {
+                        val id=data.int.toLong() and 0xffffffffL;val generation=data.long
+                        val image=images[Pair(id,generation)] ?: error("Missing terminal image pixels")
+                        val layer=data.get().toInt() and 0xff;val z=data.int;val col=data.int;val row=data.int
+                        val ox=data.int;val oy=data.int;val w=data.int;val h=data.int
+                        val sx=data.int;val sy=data.int;val sw=data.int;val sh=data.int
+                        require(layer in 0..2 && ox>=0 && oy>=0 && w>0 && h>0 && sx>=0 && sy>=0 && sw>0 && sh>0)
+                        require(sx.toLong()+sw<=image.width && sy.toLong()+sh<=image.height)
+                        TerminalImagePlacement(image,layer,z,col,row,ox,oy,w,h,sx,sy,sw,sh)
+                    }.sortedWith(compareBy({it.layer},{it.z}))
+                }
+                TerminalScreen(columns,rows,x.takeIf {it>=0},y.takeIf {it>=0},fg,bg,lines.flatten(),scroll,lines,inputFlags,placements,cw,ch)
             }
             else->error("Invalid terminal frame flag $flag")
         }
-        val imaged=if(version>=0x34545852) images(data,frame) else frame
+        val frame=readFrame(state.screen)
+        if(version==0x34545852) {
+            val count=data.short.toInt() and 0xffff;require(count<=32)
+            val previews=mutableMapOf<String,TerminalScreen>()
+            repeat(count) {val id=text();require(id.isNotEmpty() && !previews.containsKey(id));previews[id]=readFrame(null) ?: error("Missing preview frame")}
+            next=next.copy(previewFrames=previews)
+        }
         require(!data.hasRemaining()) {"Trailing terminal packet data"}
-        next=next.copy(revision=nextRevision,screen=imaged)
+        next=next.copy(revision=nextRevision,screen=frame)
         state=next;revision=nextRevision
         return next
-    }
-    /** RXT4 kitty section. Pixels arrive once per (id, generation); bitmaps not
-     *  referenced by the latest placement list are dropped. */
-    private fun images(data: ByteBuffer,frame: TerminalScreen?): TerminalScreen? {
-        if(data.get().toInt()==0) return frame
-        val cellWidth=data.int;val cellHeight=data.int
-        require(cellWidth in 0..4096 && cellHeight in 0..4096)
-        val count=data.short.toInt() and 0xffff;require(count<=256) {"Too many image placements"}
-        val placements=List(count) {
-            TerminalImagePlacement(data.int,data.long,data.get().toInt() and 0xff,data.int,data.int,data.int,
-                data.int,data.int,data.int,data.int,data.int,data.int,data.int,data.int,data.int,data.int)
-        }
-        val keys=placements.mapTo(HashSet()) {it.imageId to it.generation}
-        val pixels=(frame?.images?.pixels ?: emptyMap()).filterKeys {it in keys}.toMutableMap()
-        repeat(data.short.toInt() and 0xffff) {
-            val id=data.int;val generation=data.long;val width=data.int;val height=data.int;val length=data.int
-            require(width in 1..16384 && height in 1..16384 && length.toLong()==width.toLong()*height*4 && length<=data.remaining()) {"Invalid image pixels"}
-            val rgba=ByteArray(length);data.get(rgba)
-            if((id to generation) in keys) pixels[id to generation]=TerminalImagePixels(width,height,TerminalImagePixels.premultiply(rgba))
-        }
-        return frame?.copy(images=if(placements.isEmpty()) TerminalImages.None else TerminalImages(cellWidth,cellHeight,placements,pixels))
     }
 }

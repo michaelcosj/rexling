@@ -305,7 +305,7 @@ private data class TerminalCloseTarget(val session: String,val id: String,val la
                                 name=shortcutProfile.name)
                         }
                         if(floating.isNotEmpty()) FloatingPaneDock(floating,chosen.takeIf {floatingActive && hiddenFloating!=chosen},state.programs,state.titles,ready,
-                            ::openPane,::minimizeFloating,Modifier.align(Alignment.BottomEnd).padding(end=6.dp,bottom=2.dp),directories=state.directories,hazeState=terminalHaze,onExpandedChange={floatingBackdrop=it})
+                            ::openPane,::minimizeFloating,Modifier.align(Alignment.BottomEnd).padding(end=6.dp),directories=state.directories,hazeState=terminalHaze,onExpandedChange={floatingBackdrop=it})
                         }
                     } else Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp),contentAlignment=Alignment.Center) {
                         Text(if(state.connected) "Choose a session, or start a new one." else "Your terminals, anywhere.",
@@ -322,7 +322,7 @@ private data class TerminalCloseTarget(val session: String,val id: String,val la
                                     {model.showActivity(true)},{picker="tabs"},attentionCount=model.attentionCount)
                             })
                             KeyboardBar(controlled,ready,client.controlModifier,client.altModifier,client.shiftModifier,keyboardVisible,
-                                client::toggleControl,client::toggleAlt,client::toggleShift,client::pressShift,client::releaseShift,{client.keyForTarget(it,keyTarget)},readable=state.connected,onControlShortcut=client::controlShortcut,inputKey=keyTarget,shortcutGesture=model.shortcutGesture,arrowJoystickEnabled=model.arrowJoystickEnabled) {
+                                client::toggleControl,client::toggleAlt,client::toggleShift,client::pressShift,client::releaseShift,{client.keyForTarget(it,keyTarget)},readable=state.connected,onControlShortcut=client::controlShortcut,inputKey=keyTarget,shortcutGesture=model.shortcutGesture,arrowJoystickEnabled=model.arrowJoystickEnabled,onPaste={pasteClipboard()}) {
                                 if(!controlled) client.takeControl() else if(keyboardVisible) terminalView?.hideKeyboard() else terminalView?.keyboard()
                             }
                         }

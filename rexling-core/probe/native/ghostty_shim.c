@@ -126,13 +126,8 @@ int rp_palette(RpTerminal *t, uint8_t index, const uint8_t *rgb) {
   return ghostty_terminal_set(t->terminal, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, palette);
 }
 int rp_text(RpTerminal *t, uint8_t **out, size_t *len) {
-  GhosttyFormatterTerminalOptions options = GHOSTTY_INIT_SIZED(GhosttyFormatterTerminalOptions);
-  options.extra = (GhosttyFormatterTerminalExtra)GHOSTTY_INIT_SIZED(GhosttyFormatterTerminalExtra);
-  options.extra.screen = (GhosttyFormatterScreenExtra)GHOSTTY_INIT_SIZED(GhosttyFormatterScreenExtra);
-  options.emit = GHOSTTY_FORMATTER_FORMAT_PLAIN;
-  options.trim = true;
   GhosttyFormatter formatter = NULL;
-  int r = ghostty_formatter_terminal_new(NULL, &formatter, t->terminal, options);
+  int r = ghostty_formatter_terminal_new(NULL, &formatter, t->terminal);
   if (r == 0) r = ghostty_formatter_format_alloc(formatter, NULL, out, len);
   ghostty_formatter_free(formatter);
   return r;
@@ -165,7 +160,7 @@ int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
     uint16_t x=0;
     while (ghostty_render_state_row_cells_next(t->cells)) {
       uint32_t count=0;
-      GhosttyStyle style=GHOSTTY_INIT_SIZED(GhosttyStyle);
+      GhosttyStyle style={0};
       GhosttyColorRgb fg=colors.foreground,bg=colors.background;
       GhosttyCell raw=0; GhosttyCellWide wide=GHOSTTY_CELL_WIDE_NARROW;
 #define CELL(key,out) do { r=ghostty_render_state_row_cells_get(t->cells,key,out); if(r!=0)goto done; } while(0)
@@ -182,10 +177,13 @@ int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
         if(!next) { r=GHOSTTY_OUT_OF_MEMORY; goto done; }
         graphemes=next; capacity=count;
       }
-      if(count) { CELL(GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF,graphemes); }
-      uint16_t flags=style.bold | (style.italic<<1) | (style.faint<<2) |
-          (style.inverse<<3) | (style.invisible<<4) | (style.strikethrough<<5) |
-          ((style.underline!=0)<<6);
+      if(count) {
+        GhosttyCodepointBuffer buffer={.ptr=graphemes,.cap=capacity};
+        CELL(GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF,&buffer);
+      }
+      uint16_t flags=((style.flags & GHOSTTY_STYLE_FLAG_BOLD) != 0) | (((style.flags & GHOSTTY_STYLE_FLAG_ITALIC) != 0)<<1) | (((style.flags & GHOSTTY_STYLE_FLAG_FAINT) != 0)<<2) |
+          (((style.flags & GHOSTTY_STYLE_FLAG_INVERSE) != 0)<<3) | (((style.flags & GHOSTTY_STYLE_FLAG_INVISIBLE) != 0)<<4) | (((style.flags & GHOSTTY_STYLE_FLAG_STRIKETHROUGH) != 0)<<5) |
+          ((GHOSTTY_STYLE_UNDERLINE(style)!=0)<<6);
       uint8_t width=wide==GHOSTTY_CELL_WIDE_WIDE ? 2 :
           (wide==GHOSTTY_CELL_WIDE_SPACER_TAIL || wide==GHOSTTY_CELL_WIDE_SPACER_HEAD ? 0 : 1);
       callback(userdata,x++,y,graphemes,count,(const uint8_t *)&fg,(const uint8_t *)&bg,flags,width);

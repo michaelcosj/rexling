@@ -1,0 +1,74 @@
+{
+  "libghostty_version": "1.0.1",
+  "revision": "108cacb17ed8990840cd14abfce43d8ed8503ca1",
+  "source_sha256": "2c276d3e62cb15fb38f0d7f621f199029d1d4df86538096c6bec2a107cad7159",
+  "native_tests": {
+    "passed": 88,
+    "optional_ignored": 17
+  },
+  "real_server_graphics_test": "passed; images 7 and 8 present live and after snapshot reconnect",
+  "jvm_tests": {
+    "passed": 168,
+    "skipped": 1
+  },
+  "instrumentation": "OK (20 tests); live-JNI case skipped without its explicit session arguments",
+  "build": "release/debug/JNI, lintRelease passed",
+  "apk": {
+    "apk": "dist/Rexling-2026.11.11-build109-0559dcc969-modified-arm64-release.apk",
+    "application_label": "Rexling",
+    "version_name": "2026.11.11",
+    "version_code": 109,
+    "sha256": "f74368af352c98b5afce4a5d4e60ea1008637dda8df62486581bfe68f2e520e1",
+    "bytes": 17602951,
+    "signature_verified": true,
+    "debuggable": false,
+    "art_profiles": [
+      {
+        "name": "assets/dexopt/baseline.prof",
+        "bytes": 5985
+      },
+      {
+        "name": "assets/dexopt/baseline.profm",
+        "bytes": 802
+      }
+    ],
+    "zip_alignment_16k": true,
+    "permissions": [
+      "android.permission.INTERNET",
+      "android.permission.ACCESS_LOCAL_NETWORK",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
+      "android.permission.CHANGE_NETWORK_STATE",
+      "dev.shulhi.rex.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    ],
+    "native_libraries": [
+      {
+        "name": "lib/arm64-v8a/libandroidx.graphics.path.so",
+        "bytes": 10096,
+        "load_alignment": 16384
+      },
+      {
+        "name": "lib/arm64-v8a/libc++_shared.so",
+        "bytes": 1423696,
+        "load_alignment": 16384
+      },
+      {
+        "name": "lib/arm64-v8a/librex_android.so",
+        "bytes": 5494560,
+        "load_alignment": 16384
+      }
+    ],
+    "runtime_execution": "not performed by this static APK check"
+  },
+  "physical_installation": {
+    "device": "100.97.157.23:38789",
+    "model": "SM-S906E",
+    "version_code": 109,
+    "sha256": "f74368af352c98b5afce4a5d4e60ea1008637dda8df62486581bfe68f2e520e1",
+    "installation": "success",
+    "settings_preserved": true,
+    "app_launched": false
+  }
+}

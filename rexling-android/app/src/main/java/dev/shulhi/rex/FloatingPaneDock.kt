@@ -64,7 +64,7 @@ import androidx.compose.ui.unit.dp
                 }
             }
         }
-        Box(Modifier.padding(end=8.dp).size(40.dp,32.dp)
+        Box(Modifier.padding(end=8.dp).size(40.dp,28.dp)
             .clickable(interactionSource=remember {MutableInteractionSource()},indication=null,enabled=enabled,role=Role.Button) {if(grouped) expanded=!expanded else choose(panes.single())}
             .semantics {
                 contentDescription=if(grouped) "Floating panes" else if(active!=null) "Minimize floating pane: ${title(panes.single())}" else "Open floating pane: ${title(panes.single())}"

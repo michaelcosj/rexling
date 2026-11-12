@@ -7,13 +7,11 @@ use std::{
     marker::PhantomData,
     ptr::{self, NonNull},
     rc::Rc,
-    sync::Arc,
 };
 
 type ApcFn = unsafe extern "C" fn(*mut c_void, *const u8, usize);
 type CellFn =
     unsafe extern "C" fn(*mut c_void, u16, u16, *const u32, usize, *const u8, *const u8, u32, u8, *const u8, usize);
-type ImageFn = unsafe extern "C" fn(*mut c_void, *const ImagePlacement);
 #[repr(C)]
 #[derive(Default)]
 struct RawFrame {
@@ -28,100 +26,6 @@ struct RawFrame {
     scroll_offset: u64,
     scroll_visible: u64,
     input_flags: u8,
-    image_generation: u64,
-    cell_width_px: u32,
-    cell_height_px: u32,
-    animation_delay_ms: i64,
-}
-/// One drawable kitty placement, positioned by libghostty's render state.
-/// Pixel sizes use the replica's cell size (`Frame::cell_px`).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ImagePlacement {
-    pub image_id: u32,
-    pub image_generation: u64,
-    /// 0 below cell backgrounds, 1 below text, 2 above text.
-    pub layer: u8,
-    pub z: i32,
-    /// Top-left cell in the viewport; may be negative when partly off screen.
-    pub col: i32,
-    pub row: i32,
-    pub cols: u32,
-    pub rows: u32,
-    pub offset_x: u32,
-    pub offset_y: u32,
-    pub width: u32,
-    pub height: u32,
-    pub source_x: u32,
-    pub source_y: u32,
-    pub source_width: u32,
-    pub source_height: u32,
-}
-/// Decoded image pixels as straight RGBA8, row-major.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ImagePixels {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
-}
-/// Most placements kept per frame; more than this is pathological.
-pub const MAX_PLACEMENTS: usize = 256;
-/// Largest PNG we decode for kitty graphics (matches the per-pane budget).
-const PNG_LIMIT: usize = 32 * 1024 * 1024;
-/// Called by the C shim from inside a VT write. Returns a Rust-owned RGBA8
-/// buffer or null; the shim copies it into Ghostty's allocator and frees it.
-///
-/// # Safety
-/// `data` must point to `len` readable bytes and the out pointers must be writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rex_png_decode(data: *const u8, len: usize, width: *mut u32, height: *mut u32, out_len: *mut usize) -> *mut u8 {
-    if data.is_null() || width.is_null() || height.is_null() || out_len.is_null() {return ptr::null_mut();}
-    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
-    let Ok(pixels) = std::panic::catch_unwind(|| decode_png(bytes)) else {return ptr::null_mut();};
-    let Some(pixels) = pixels else {return ptr::null_mut();};
-    let mut boxed = pixels.rgba.into_boxed_slice();
-    unsafe {*width = pixels.width;*height = pixels.height;*out_len = boxed.len();}
-    let raw = boxed.as_mut_ptr();
-    std::mem::forget(boxed);
-    raw
-}
-/// # Safety
-/// `data`/`len` must come from `rex_png_decode` and be freed once.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rex_png_free(data: *mut u8, len: usize) {
-    if !data.is_null() {
-        drop(unsafe { Box::from_raw(ptr::slice_from_raw_parts_mut(data, len)) });
-    }
-}
-pub fn decode_png(bytes: &[u8]) -> Option<ImagePixels> {
-    let mut decoder = png::Decoder::new_with_limits(bytes, png::Limits { bytes: PNG_LIMIT });
-    // Expand palettes/low bit depths and strip 16-bit so output is 8-bit gray/GA/RGB/RGBA.
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = decoder.read_info().ok()?;
-    let mut buffer = vec![0; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut buffer).ok()?;
-    buffer.truncate(info.buffer_size());
-    let format = match info.color_type {
-        png::ColorType::Grayscale => 4,
-        png::ColorType::GrayscaleAlpha => 3,
-        png::ColorType::Rgb => 0,
-        png::ColorType::Rgba => 1,
-        png::ColorType::Indexed => return None,
-    };
-    let rgba = to_rgba(format, info.width, info.height, &buffer)?;
-    Some(ImagePixels { width: info.width, height: info.height, rgba })
-}
-/// Convert a libghostty kitty pixel format (RGB 0, RGBA 1, GA 3, gray 4) to RGBA8.
-fn to_rgba(format: u32, width: u32, height: u32, data: &[u8]) -> Option<Vec<u8>> {
-    let pixels = (width as usize).checked_mul(height as usize)?;
-    let channels = match format {0=>3, 1=>4, 3=>2, 4=>1, _=>return None};
-    let src = data.get(..pixels.checked_mul(channels)?)?;
-    Some(match channels {
-        4 => src.to_vec(),
-        3 => src.as_chunks::<3>().0.iter().flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
-        2 => src.as_chunks::<2>().0.iter().flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
-        _ => src.iter().flat_map(|g| [*g, *g, *g, 255]).collect(),
-    })
 }
 unsafe extern "C" {
     fn rp_new(cols: u16, rows: u16, out: *mut *mut c_void) -> i32;
@@ -150,14 +54,9 @@ unsafe extern "C" {
         frame: *mut RawFrame,
         callback: CellFn,
         userdata: *mut c_void,
-        known_images: u64,
-        image_callback: ImageFn,
-        image_userdata: *mut c_void,
     ) -> i32;
-    fn rp_image_limit(term: *mut c_void, bytes: u64) -> i32;
-    fn rp_image_pixels(term: *mut c_void, id: u32, width: *mut u32, height: *mut u32, format: *mut u32, data: *mut *const u8, len: *mut usize) -> i32;
 }
-fn check(code: i32, action: &str) -> Result<()> {
+pub(crate) fn check(code: i32, action: &str) -> Result<()> {
     ensure!(code == 0, "libghostty {action} failed (result {code})");
     Ok(())
 }
@@ -173,7 +72,7 @@ pub struct Cell {
     pub width: u8,
     pub hyperlink: Option<String>,
 }
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Frame {
     pub columns: u16,
     pub rows: u16,
@@ -187,20 +86,9 @@ pub struct Frame {
     pub scroll_offset: u64,
     pub scroll_visible: u64,
     pub input_flags: u8,
-    /// Kitty placements, drawn in layer then z order. Shared between frames
-    /// while `image_generation` is unchanged.
-    pub images: Arc<[ImagePlacement]>,
-    /// Changes whenever the placement list changes (0: never had images).
-    pub image_generation: u64,
-    /// Cell size, in pixels, that placement sizes are expressed in.
-    pub cell_px: (u32, u32),
-    /// Milliseconds until the next animation frame, if an animation plays.
-    pub animation_delay_ms: Option<u64>,
-    /// Pixels for every placed image whose pixels are available, keyed by
-    /// (image id, image generation). Shared between frames while unchanged.
-    pub image_pixels: Arc<[ImageEntry]>,
+    pub next_image_delay_ms:Option<u64>,
+    pub image_cell_width:u32,pub image_cell_height:u32,pub images:Vec<crate::graphics::Placement>,
 }
-pub type ImageEntry = ((u32, u64), Arc<ImagePixels>);
 impl Frame {
     pub fn text(&self) -> String {
         (0..self.rows)
@@ -267,9 +155,9 @@ impl Frame {
 
 pub struct Terminal {
     handle: NonNull<c_void>,
-    images: (u64, Arc<[ImagePlacement]>),
-    pixels: Arc<[ImageEntry]>,
     _owner_thread: PhantomData<Rc<()>>,
+    images:crate::graphics::Images,
+    graphics_clock:std::time::Instant,
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
@@ -284,16 +172,16 @@ impl Terminal {
             columns > 0 && rows > 0,
             "terminal dimensions must be positive"
         );
+        crate::graphics::init()?;
         let mut handle = ptr::null_mut();
         check(unsafe { rp_new(columns, rows, &mut handle) }, "create")?;
         Ok(Self {
             handle: NonNull::new(handle).context("null terminal")?,
-            images: (0, Arc::from([])),
-            pixels: Arc::from([]),
-            _owner_thread: PhantomData,
+            _owner_thread: PhantomData,images:Default::default(),graphics_clock:std::time::Instant::now(),
         })
     }
     pub fn decode(bytes: &[u8]) -> Result<(Self, usize)> {
+        crate::graphics::init()?;
         let mut handle = ptr::null_mut();
         let mut offset = 0;
         check(
@@ -303,9 +191,7 @@ impl Terminal {
         Ok((
             Self {
                 handle: NonNull::new(handle).context("null decoded terminal")?,
-                images: (0, Arc::from([])),
-                pixels: Arc::from([]),
-                _owner_thread: PhantomData,
+                _owner_thread: PhantomData,images:Default::default(),graphics_clock:std::time::Instant::now(),
             },
             offset,
         ))
@@ -402,6 +288,10 @@ impl Terminal {
         unsafe { rp_scroll(self.handle.as_ptr(), 0, 1) };
     }
     pub fn frame(&mut self) -> Result<Frame> {
+        self.frame_at(self.graphics_clock.elapsed().as_millis() as u64)
+    }
+    pub(crate) fn frame_at(&mut self,now:u64) -> Result<Frame> {
+        let next_image_delay_ms=crate::graphics::animation_delay(self.handle.as_ptr(),now)?;
         unsafe extern "C" fn cell(
             userdata: *mut c_void,
             x: u16,
@@ -420,6 +310,7 @@ impl Terminal {
             } else {
                 unsafe { std::slice::from_raw_parts(points, len) }
             };
+            let points=if points.first()==Some(&0x10eeee) {&[][..]} else {points};
             let text = points
                 .iter()
                 .map(|p| char::from_u32(*p).unwrap_or('\u{fffd}'))
@@ -441,12 +332,8 @@ impl Terminal {
                 });
             }
         }
-        unsafe extern "C" fn image(userdata: *mut c_void, placement: *const ImagePlacement) {
-            unsafe { (&mut *userdata.cast::<Vec<ImagePlacement>>()).push(*placement) };
-        }
         let mut raw = RawFrame::default();
         let mut cells = Vec::<Cell>::new();
-        let mut placements = Vec::<ImagePlacement>::new();
         check(
             unsafe {
                 rp_frame(
@@ -454,20 +341,12 @@ impl Terminal {
                     &mut raw,
                     cell,
                     (&mut cells as *mut Vec<Cell>).cast(),
-                    self.images.0,
-                    image,
-                    (&mut placements as *mut Vec<ImagePlacement>).cast(),
                 )
             },
             "render state",
         )?;
-        if raw.image_generation != self.images.0 {
-            // Draw order: layer, then z-index, then the order libghostty listed them.
-            placements.sort_by_key(|p| (p.layer, p.z));
-            placements.truncate(MAX_PLACEMENTS);
-            self.images = (raw.image_generation, Arc::from(placements));
-        }
-        self.refresh_pixels();
+        let (image_cell_width,image_cell_height,images)=self.images.frame(self.handle.as_ptr())?;
+        let next_image_delay_ms=next_image_delay_ms.filter(|_|!images.is_empty());
         Ok(Frame {
             columns: raw.columns,
             rows: raw.rows,
@@ -479,47 +358,8 @@ impl Terminal {
             scroll_offset: raw.scroll_offset,
             scroll_visible: raw.scroll_visible,
             input_flags: raw.input_flags,
-            cells,
-            images: self.images.1.clone(),
-            image_generation: raw.image_generation,
-            cell_px: (raw.cell_width_px, raw.cell_height_px),
-            animation_delay_ms: u64::try_from(raw.animation_delay_ms).ok(),
-            image_pixels: self.pixels.clone(),
+            cells,image_cell_width,image_cell_height,images,next_image_delay_ms,
         })
-    }
-    /// Keep pixels for exactly the placed (id, generation) pairs. Pairs whose
-    /// pixels aren't available yet (snapshot still streaming) are retried on
-    /// every frame; the list is only rebuilt when something changed.
-    fn refresh_pixels(&mut self) {
-        let mut wanted: Vec<(u32, u64)> = self.images.1.iter().map(|p| (p.image_id, p.image_generation)).collect();
-        wanted.sort_unstable();
-        wanted.dedup();
-        let have: Vec<(u32, u64)> = self.pixels.iter().map(|(key, _)| *key).collect();
-        if have == wanted {return;}
-        let mut next = Vec::with_capacity(wanted.len());
-        for key in wanted {
-            if let Some(found) = self.pixels.iter().find(|(k, _)| *k == key) {
-                next.push(found.clone());
-            } else if let Some(pixels) = self.image_pixels(key.0) {
-                next.push((key, Arc::new(pixels)));
-            }
-        }
-        if next.len() != have.len() || next.iter().zip(&have).any(|((k, _), h)| k != h) {
-            self.pixels = Arc::from(next);
-        }
-    }
-    /// Copy one image's current pixels as RGBA8, or None if it's gone or
-    /// its pixels haven't arrived yet (e.g. still restoring from a snapshot).
-    pub fn image_pixels(&mut self, id: u32) -> Option<ImagePixels> {
-        let (mut width, mut height, mut format, mut data, mut len) = (0, 0, 0, ptr::null(), 0);
-        let code = unsafe { rp_image_pixels(self.handle.as_ptr(), id, &mut width, &mut height, &mut format, &mut data, &mut len) };
-        if code != 0 || data.is_null() {return None;}
-        let bytes = unsafe { std::slice::from_raw_parts(data, len) };
-        Some(ImagePixels { width, height, rgba: to_rgba(format, width, height, bytes)? })
-    }
-    /// Kitty image budget for this replica in bytes; 0 turns images off here only.
-    pub fn set_image_limit(&mut self, bytes: u64) -> Result<()> {
-        check(unsafe { rp_image_limit(self.handle.as_ptr(), bytes) }, "image limit")
     }
     fn theme(&mut self, event: &Value) -> Result<()> {
         for (which, name) in ["foreground", "background", "cursor"].iter().enumerate() {
@@ -650,107 +490,6 @@ impl Replica {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn png_bytes(width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
-        let mut out = Vec::new();
-        let mut encoder = png::Encoder::new(&mut out, width, height);
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.write_header().unwrap().write_image_data(rgb).unwrap();
-        out
-    }
-    fn kitty(control: &str, payload: &[u8]) -> Vec<u8> {
-        use base64::Engine;
-        format!("\x1b_G{control};{}\x1b\\", base64::engine::general_purpose::STANDARD.encode(payload)).into_bytes()
-    }
-    fn image_terminal() -> Terminal {
-        let mut terminal = Terminal::new(20, 10).unwrap();
-        terminal.resize(20, 10, 10, 20).unwrap();
-        terminal
-    }
-    #[test]
-    fn kitty_rgba_placement_is_positioned_and_pixels_are_readable() {
-        let mut terminal = image_terminal();
-        terminal.write(b"\x1b[3;5H").unwrap();
-        terminal.write(&kitty("a=T,f=32,s=2,v=2,i=7,c=4,r=2,q=2", &[255,0,0,255, 0,255,0,255, 0,0,255,255, 9,9,9,128])).unwrap();
-        let frame = terminal.frame().unwrap();
-        assert_eq!(frame.cell_px, (10, 20));
-        assert_ne!(frame.image_generation, 0);
-        assert_eq!(frame.images.len(), 1);
-        let p = frame.images[0];
-        assert_eq!((p.image_id, p.col, p.row, p.cols, p.rows), (7, 4, 2, 4, 2));
-        assert_eq!((p.width, p.height), (40, 40));
-        assert_eq!((p.source_width, p.source_height), (2, 2));
-        let pixels = terminal.image_pixels(7).unwrap();
-        assert_eq!((pixels.width, pixels.height), (2, 2));
-        assert_eq!(&pixels.rgba[..4], &[255, 0, 0, 255]);
-        assert_eq!(&pixels.rgba[12..], &[9, 9, 9, 128]);
-        assert_eq!(frame.image_pixels.len(), 1);
-        assert_eq!(frame.image_pixels[0].0, (7, p.image_generation));
-        // An unchanged list is shared, not rebuilt.
-        let again = terminal.frame().unwrap();
-        assert!(Arc::ptr_eq(&frame.images, &again.images));
-        assert!(Arc::ptr_eq(&frame.image_pixels, &again.image_pixels));
-    }
-    #[test]
-    fn kitty_png_is_decoded_to_rgba_and_rgb_and_gray_are_expanded() {
-        let mut terminal = image_terminal();
-        let png = png_bytes(2, 1, &[10, 20, 30, 40, 50, 60]);
-        terminal.write(&kitty("a=T,f=100,i=3,q=2", &png)).unwrap();
-        let pixels = terminal.image_pixels(3).expect("PNG decoded through the Rust callback");
-        assert_eq!(pixels.rgba, vec![10, 20, 30, 255, 40, 50, 60, 255]);
-        terminal.write(&kitty("a=T,f=24,s=1,v=1,i=4,q=2", &[1, 2, 3])).unwrap();
-        assert_eq!(terminal.image_pixels(4).unwrap().rgba, vec![1, 2, 3, 255]);
-        assert!(decode_png(b"not a png").is_none());
-        assert_eq!(to_rgba(4, 2, 1, &[7, 8]).unwrap(), vec![7, 7, 7, 255, 8, 8, 8, 255]);
-        assert_eq!(to_rgba(3, 1, 1, &[7, 99]).unwrap(), vec![7, 7, 7, 99]);
-        assert!(to_rgba(1, 2, 2, &[0; 3]).is_none(), "short buffers are rejected");
-    }
-    #[test]
-    fn kitty_images_survive_snapshot_delete_and_scroll() {
-        let mut terminal = image_terminal();
-        terminal.write(&kitty("a=T,f=24,s=1,v=1,i=9,c=2,r=1,q=2", &[5, 6, 7])).unwrap();
-        let before = terminal.frame().unwrap();
-        assert_eq!(before.images.len(), 1);
-        let row = before.images[0].row;
-        // Restored from a snapshot, the image keeps its place and pixels.
-        let snapshot = terminal.encode().unwrap();
-        let (mut restored, _) = Terminal::decode(&snapshot).unwrap();
-        restored.resize(20, 10, 10, 20).unwrap();
-        let after = restored.frame().unwrap();
-        assert_eq!(after.images.len(), 1);
-        assert_eq!(after.images[0].image_id, 9);
-        assert_eq!(restored.image_pixels(9).unwrap().rgba, vec![5, 6, 7, 255]);
-        // Output scrolls the placement up with the text.
-        restored.write(&b"\r\n".repeat(3)).unwrap();
-        let scrolled = restored.frame().unwrap();
-        assert_eq!(scrolled.images.len(), 1);
-        assert!(scrolled.images[0].row <= row);
-        // Deleting removes the placement and the image.
-        restored.write(b"\x1b_Ga=d,d=I,i=9,q=2\x1b\\").unwrap();
-        let deleted = restored.frame().unwrap();
-        assert!(deleted.images.is_empty());
-        assert_ne!(deleted.image_generation, scrolled.image_generation);
-    }
-    #[test]
-    fn kitty_unicode_placeholders_produce_virtual_placements() {
-        let mut terminal = image_terminal();
-        terminal.write(&kitty("a=T,f=24,s=1,v=1,i=11,U=1,c=2,r=1,q=2", &[1, 1, 1])).unwrap();
-        // Placeholder cells: U+10EEEE with row/column diacritics, image id in the foreground colour.
-        terminal.write("\x1b[38;5;11m\u{10EEEE}\u{0305}\u{0305}\u{10EEEE}\u{0305}\u{030D}\x1b[39m".as_bytes()).unwrap();
-        let frame = terminal.frame().unwrap();
-        assert_eq!(frame.images.len(), 1, "{:?}", frame.images);
-        assert_eq!(frame.images[0].image_id, 11);
-        assert_eq!(frame.images[0].rows, 1);
-    }
-    #[test]
-    fn image_limit_zero_turns_kitty_graphics_off() {
-        let mut terminal = image_terminal();
-        terminal.set_image_limit(0).unwrap();
-        terminal.write(&kitty("a=T,f=24,s=1,v=1,i=2,q=2", &[1, 2, 3])).unwrap();
-        assert!(terminal.frame().unwrap().images.is_empty());
-        assert!(terminal.image_pixels(2).is_none());
-    }
     #[test]
     fn restored_scrollback_scrolls_locally_and_keeps_new_output_anchored() {
         let mut original = Terminal::new(30, 4).unwrap();

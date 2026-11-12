@@ -836,36 +836,18 @@ The existing native metadata field `sent` now carries confirmed progress.
 Ping/Pong behavior follows [RFC 6455 sections 5.5.2–5.5.3](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.2).
 It was verified against both configured Rex servers and throttled loopback peers.
 
-## Kitty graphics and RXT4 (2026-11-12)
+## Kitty graphics and local RXT4 frames
 
-The replica now stores kitty graphics images. libghostty-vt parses `ESC _ G`
-APCs, stores images per screen and positions every placement (cell, Unicode
-placeholder and relative) in its render state. The shim sets a 32 MB per-pane
-storage limit, also applied when restoring a snapshot. It registers a PNG
-decoder that calls into Rust (`png` crate). File, temp-file and shared-memory
-media stay disabled because they name server paths. There is still no
-`WRITE_PTY` callback: the server's terminal answers `a=q` queries (verified:
-Rex replies OK).
+The pinned libghostty-vt image API is enabled with a 16 MiB per-screen storage limit. A bounded pure-Rust PNG callback allocates output using Ghostty's allocator; RGB/RGBA/gray pixels are copied into shared immutable RGBA buffers only when image generation changes. Snapshot decoding applies the same storage limit before restoration. Phone file, temporary-file and shared-memory media are disabled. Live inline data and Rex-normalized remote file images use the normal terminal stream; no new server RPC is required.
 
-Rex's snapshots carry kitty storage records, so images survive reconnecting.
-Live transmissions arrive as ordinary VT. No Rex wire changes.
+The public render-state image iterator supplies cropped source rectangles, destination pixels/cell offsets, viewport coordinates, layer and z-index, including Unicode/relative placements. Frames own pixel references, never borrowed Ghostty pointers. Image animation ticks use a terminal-local monotonic clock; the actor schedules the next library deadline only while a visible frame has images. Placeholder glyphs are omitted from text drawing/copying.
 
-Resize and take now send `cell_width_px`/`cell_height_px` (the live view's
-cell size in device pixels) with `com.superlogical.terminal.resize`. Without
-them Rex reported 8×16 px cells and programs sized images for those.
+Private JNI packets now use `RXT4`, retaining RXT3's header, input flags, changed-row/cell and hyperlink encoding. Every full/delta frame appends:
 
-Local JNI packets use RXT4: RXT3 followed by an image section.
-- `u8 flag`. 0 means unchanged; keep the previous placements and pixels.
-- If the flag is 1, the section continues with:
-  - `u32 cell_w, u32 cell_h`: the replica cell pixels that placement sizes use.
-  - `u16 n` placements, each: `u32 id, u64 generation, u8 layer, i32 z, i32 col,
-    i32 row, u32 cols, rows, offset_x, offset_y, width, height, source_x,
-    source_y, source_w, source_h`. Layers are 0 below backgrounds, 1 below text,
-    2 above text. The order is layer, then z.
-  - `u16 m` pixel blobs, each: `u32 id, u64 generation, u32 w, u32 h, u32 len`,
-    then straight RGBA8 bytes.
+- u32 canonical cell width and height in pixels;
+- u16 asset count, then each changed image: u32 ID, u64 generation, u32 width/height, u32 RGBA byte length, and unpremultiplied RGBA bytes;
+- u16 placement count, then each placement: u32 ID, u64 generation, u8 layer, i32 z/column/row, followed by eight u32 values (x/y cell offsets, destination width/height, source x/y/width/height).
 
-Pixels are sent once per (id, generation) per decoder and resent after a
-reset. Android drops pixels that the latest list doesn't reference. Placements
-are drawn every frame from cached bitmaps, so row recordings stay valid.
-Android still accepts RXT1–RXT3.
+Unchanged pixels reuse the delivered delta base. Full frames include every referenced image; changed placements are sent even when no text row changed. Missing assets, invalid crops and oversized data reject a packet without committing the decoder revision. After the selected frame section, every RXT4 packet carries u16 preview count, each with a UTF-8 pane ID and a complete frame section; image-bearing previews no longer use JSON/base64. The decoder accepts historical RXT1–RXT3. JSON polling remains a text/activity diagnostic path.
+
+Android draws images below cell backgrounds, between backgrounds/text or above text in z order, clipped to terminal content. Image-free terminals retain the existing row cache. Image bitmaps are cached by owned image identity, so IDs reused in another pane/server cannot display old pixels. Cropping, pixel-to-cell scaling and alpha are applied during Canvas rendering; snapshots retain pixels for disconnected/cached pane views.

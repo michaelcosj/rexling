@@ -1,5 +1,12 @@
 # Plan: Kitty graphics protocol support
 
+> **Superseded (2026-11-12).** Upstream shipped its own kitty graphics support
+> the same day (shulhi/rexling `d91094e`: libghostty `108cacb`, `graphics.rs`,
+> RXT4 with binary previews). We reverted our implementation and took upstream's.
+> The one piece kept from this plan is sending `cell_width_px`/`cell_height_px`
+> with resize and take (upstream doesn't), so programs size images for our real
+> cells. Kept for the Phase 0 findings.
+
 Show images sent with the kitty graphics protocol (icat, yazi previews,
 image.nvim, chafa/timg `--format kitty`, etc.) inside Rexling's terminal.
 

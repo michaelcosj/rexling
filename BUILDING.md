@@ -40,7 +40,7 @@ Android project. To select another JDK on macOS, run `./gradlew` directly from
 ```
 
 Open `rexling-android/` in Android Studio. Gradle runs the native build helper
-automatically. Ghostty revision, source checksums, Zig downloads and NDK version
+automatically. libghostty-vt is pinned to release 1.0.1. Ghostty revision, source checksums, Zig downloads and NDK version
 are pinned in `rexling-core/native/ghostty-source.json`. Rust dependencies share
 `rexling-core/Cargo.lock`. The AGP, Kotlin/Compose, Gradle and AndroidX versions
 remain pinned by the Android project.

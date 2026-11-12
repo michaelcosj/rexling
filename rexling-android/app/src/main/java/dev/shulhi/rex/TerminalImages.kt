@@ -5,75 +5,40 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
-import java.nio.ByteBuffer
 
-/**
- * One kitty graphics placement, positioned by libghostty. Sizes are in the
- * replica's cell pixels ([TerminalImages.cellWidth]/[TerminalImages.cellHeight]).
- */
-data class TerminalImagePlacement(
-    val imageId: Int,val generation: Long,val layer: Int,val z: Int,
-    val col: Int,val row: Int,val cols: Int,val rows: Int,val offsetX: Int,val offsetY: Int,val width: Int,val height: Int,
-    val sourceX: Int,val sourceY: Int,val sourceWidth: Int,val sourceHeight: Int,
-) {
-    companion object {
-        const val BELOW_BACKGROUND=0;const val BELOW_TEXT=1;const val ABOVE_TEXT=2
-    }
-}
-
-/**
- * Premultiplied RGBA pixels for one image generation. The Bitmap is made on
- * first draw (main thread) and the byte array is released after that.
- */
-class TerminalImagePixels(val width: Int,val height: Int,premultipliedRgba: ByteArray) {
-    private var pixels: ByteArray?=premultipliedRgba
-    private var bitmap: Bitmap?=null
-    fun bitmap(): Bitmap? {
-        bitmap?.let {return it}
-        val data=pixels ?: return null
-        return runCatching {
-            Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888).also {it.copyPixelsFromBuffer(ByteBuffer.wrap(data))}
-        }.getOrNull()?.also {bitmap=it;pixels=null}
-    }
-    companion object {
-        /** Straight RGBA8 to the premultiplied RGBA byte order ARGB_8888 buffers use. Modifies [rgba]. */
-        fun premultiply(rgba: ByteArray): ByteArray {
-            for(i in 0 until rgba.size-3 step 4) {
-                val a=rgba[i+3].toInt() and 255
-                if(a!=255) for(c in 0..2) rgba[i+c]=(((rgba[i+c].toInt() and 255)*a+127)/255).toByte()
-            }
-            return rgba
+/** Image identity belongs to one decoded frame stream, never just an image ID. */
+internal class TerminalImages {
+    private val cache=java.util.LinkedHashMap<TerminalImage,Bitmap>(8,.75f,true)
+    private var bytes=0L
+    private val paint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    fun clear() {cache.clear();bytes=0}
+    private fun bitmap(image: TerminalImage): Bitmap {
+        cache[image]?.let {return it}
+        val pixels=IntArray(image.width*image.height)
+        for(i in pixels.indices) {
+            val p=i*4;val rgba=image.rgba
+            pixels[i]=((rgba[p+3].toInt() and 255) shl 24) or ((rgba[p].toInt() and 255) shl 16) or
+                ((rgba[p+1].toInt() and 255) shl 8) or (rgba[p+2].toInt() and 255)
         }
+        val bitmap=Bitmap.createBitmap(pixels,image.width,image.height,Bitmap.Config.ARGB_8888)
+        cache[image]=bitmap;bytes+=bitmap.allocationByteCount
+        val entries=cache.entries.iterator()
+        while(bytes>32L*1024*1024 && cache.size>1 && entries.hasNext()) {
+            val old=entries.next();bytes-=old.value.allocationByteCount;entries.remove()
+            // Display lists may still hold older bitmaps; let Android release them safely.
+        }
+        return bitmap
     }
-}
-
-/** Placements in draw order plus the pixels they reference. Immutable per frame. */
-class TerminalImages(val cellWidth: Int,val cellHeight: Int,val placements: List<TerminalImagePlacement>,val pixels: Map<Pair<Int,Long>,TerminalImagePixels>) {
-    val isEmpty: Boolean get()=placements.isEmpty()
-    /**
-     * Draw one layer. The canvas is already translated to the grid origin and
-     * clipped; replica cell pixels are scaled to the view's cell size.
-     */
-    fun draw(canvas: Canvas,layer: Int,viewCellWidth: Float,viewCellHeight: Float,paint: Paint) {
-        if(placements.isEmpty()) return
-        val scaleX=if(cellWidth>0) viewCellWidth/cellWidth else 1f
-        val scaleY=if(cellHeight>0) viewCellHeight/cellHeight else 1f
-        for(p in placements) {
+    fun draw(canvas: Canvas,screen: TerminalScreen,layer: Int,left: Float,top: Float,right: Float,bottom: Float,cw: Float,ch: Float) {
+        val sx=cw/screen.imageCellWidth.coerceAtLeast(1);val sy=ch/screen.imageCellHeight.coerceAtLeast(1)
+        val save=canvas.save();canvas.clipRect(left,top,right,bottom)
+        for(p in screen.images) {
             if(p.layer!=layer) continue
-            val bitmap=pixels[p.imageId to p.generation]?.bitmap() ?: continue
-            val target=target(p,viewCellWidth,viewCellHeight,scaleX,scaleY) ?: continue
-            source.set(p.sourceX,p.sourceY,(p.sourceX+p.sourceWidth).coerceAtMost(bitmap.width),(p.sourceY+p.sourceHeight).coerceAtMost(bitmap.height))
-            if(source.isEmpty) continue
-            canvas.drawBitmap(bitmap,source,target,paint)
+            val x=left+p.col*cw+p.offsetX*sx;val y=top+p.row*ch+p.offsetY*sy
+            val target=RectF(x,y,x+p.width*sx,y+p.height*sy)
+            if(!RectF.intersects(target,RectF(left,top,right,bottom))) continue
+            canvas.drawBitmap(bitmap(p.image),Rect(p.sourceX,p.sourceY,p.sourceX+p.sourceWidth,p.sourceY+p.sourceHeight),target,paint)
         }
+        canvas.restoreToCount(save)
     }
-    // Lazy: JVM unit tests build TerminalImages without Android graphics classes.
-    private val source by lazy {Rect()};private val destination by lazy {RectF()}
-    private fun target(p: TerminalImagePlacement,cw: Float,ch: Float,sx: Float,sy: Float): RectF? {
-        if(p.sourceWidth<=0 || p.sourceHeight<=0 || p.width<=0 || p.height<=0) return null
-        val left=p.col*cw+p.offsetX*sx;val top=p.row*ch+p.offsetY*sy
-        destination.set(left,top,left+p.width*sx,top+p.height*sy)
-        return destination
-    }
-    companion object {val None=TerminalImages(0,0,emptyList(),emptyMap())}
 }
