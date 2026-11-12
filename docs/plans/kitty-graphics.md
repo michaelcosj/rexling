@@ -3,7 +3,22 @@
 Show images sent with the kitty graphics protocol (icat, yazi previews,
 image.nvim, chafa/timg `--format kitty`, etc.) inside Rexling's terminal.
 
-Status: draft, not reviewed.
+Status: approved 2026-11-12. Phases 0–2 and the Phase 3 drawing are implemented
+on `feat/kitty-graphics`; on-device testing and Phase 4/5 items remain (see
+Progress).
+
+## Progress
+
+- [x] Phase 0: Rex answers `a=q` OK; found that we never sent cell pixels
+- [x] Phase 1: shim limit, PNG decoder, image list and pixels, Rust tests
+- [x] Phase 2: RXT4 packet, Kotlin decoder and unit tests
+- [x] Phase 3: `TerminalView` layers, lazy bitmaps (needs on-device check)
+- [x] Cell pixel size sent with resize/take
+- [x] Animation redraw deadlines in the engine
+- [ ] On-device check with icat, yazi, image.nvim, chafa, animated GIF
+- [ ] Hidden-pane pixel deferral, Kotlin LRU budget across panes
+- [ ] "Show images" preference toggle
+- [ ] VALIDATION.md and README fork list
 
 ## What we already know
 
