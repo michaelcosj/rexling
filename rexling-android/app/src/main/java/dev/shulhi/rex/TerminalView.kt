@@ -108,6 +108,15 @@ class TerminalView(context: Context) : View(context) {
     private val fonts = TerminalFonts(context)
     private val terminalImages=TerminalImages()
     private data class RecordedRow(val cells: List<TerminalCell>,val recording: TerminalRowRecording,val links: List<TerminalLink>)
+    /**
+     * Smooth scrolling: pixels scrolled past the last whole line that the
+     * canvas slides by. Positive means content moves up (scrolling forward).
+     * Whole lines go to the replica; the remainder is only drawn here, using
+     * the overscan rows at the edges.
+     */
+    private var scrollRemainder=0f
+    /** Scrollback offset we asked the replica for while lines are in flight. */
+    private var targetOffset: Long?=null
     private val linkIndex=TerminalLinks.Index()
     private var recorded= arrayOfNulls<RecordedRow>(0)
     private var rowGeometry=""
@@ -187,12 +196,19 @@ class TerminalView(context: Context) : View(context) {
         if(geometry!=rowGeometry) {clearRows();recorded=arrayOfNulls(visibleRows);rowGeometry=geometry}
         android.os.Trace.beginSection("Rexlink.linkIndex")
         val rowLinks=try {linkIndex.update(frame)} finally {android.os.Trace.endSection()}
+        // Content that only moved keeps its recording: reuse rows by content
+        // when the whole screen shifted, so a one-line scroll records one row.
+        reuseShiftedRows(frame,visibleRows)
+        val slide=slideFor(frame)
+        if(slide!=0f) {canvas.save();canvas.clipRect(0f,insetTop,width.toFloat(),height-insetBottom);canvas.translate(0f,-slide)}
         if(frame.images.isEmpty()) {
+        if(slide<0f) frame.above.forEachIndexed {i,row->drawLooseRow(canvas,row,visibleColumns,insetTop-(frame.above.size-i)*cellHeight)}
+        if(slide>0f) frame.below.forEachIndexed {i,row->drawLooseRow(canvas,row,visibleColumns,insetTop+(visibleRows+i)*cellHeight)}
         for(y in 0 until visibleRows) {
             val cells=frame.lines[y]
             var row=recorded[y]
             val links=rowLinks[y]
-            if(row==null || !row.recording.valid || row.cells!=cells || row.links!=links) {
+            if(row==null || !row.recording.valid || !sameCells(row.cells,cells) || row.links!=links) {
                 val origin=if(y==0) 0f else insetTop+y*cellHeight
                 val top=if(y==0) insetTop else 0f
                 val bottom=if(y==visibleRows-1) height-origin else top+cellHeight
@@ -230,9 +246,10 @@ class TerminalView(context: Context) : View(context) {
             }
             images(0);rows(1);images(1);rows(2);images(2)
         }
+        if(slide!=0f) canvas.restore()
         canvas.save()
         canvas.clipRect(insetHorizontal,insetTop,width-insetHorizontal,height-insetBottom)
-        canvas.translate(insetHorizontal,insetTop)
+        canvas.translate(insetHorizontal,insetTop-slide)
         if (selection==null && frame.cursorX != null && frame.cursorY != null) {
             val cell=frame.lines.getOrNull(frame.cursorY)?.firstOrNull {it.x==frame.cursorX && it.width>0}
             val x = frame.cursorX * cellWidth; val y = frame.cursorY * cellHeight
@@ -261,6 +278,46 @@ class TerminalView(context: Context) : View(context) {
         canvas.restoreToCount(saved)
         if(token!=null) android.os.Trace.endSection()
         android.os.Trace.endSection()
+    }
+    /** Rows compare by content only; a row that moved is the same drawing. */
+    private fun sameCells(a: List<TerminalCell>,b: List<TerminalCell>): Boolean {
+        if(a===b) return true
+        if(a.size!=b.size) return false
+        for(i in a.indices) {val x=a[i];val y=b[i]
+            if(x.x!=y.x || x.width!=y.width || x.attributes!=y.attributes || x.foreground!=y.foreground ||
+                x.background!=y.background || x.text!=y.text || x.hyperlink!=y.hyperlink) return false}
+        return true
+    }
+    /**
+     * When the grid scrolled, move recordings with their content instead of
+     * re-recording every row. Only interior rows (same height) are moved; the
+     * first and last rows carry padding and are re-recorded if they changed.
+     */
+    private fun reuseShiftedRows(frame: TerminalScreen,visibleRows: Int) {
+        if(recorded.size!=visibleRows || visibleRows<4) return
+        if(recorded.indices.all {y->recorded[y]?.let {sameCells(it.cells,frame.lines[y])}==true}) return
+        val shift=(1..visibleRows/2).flatMap {listOf(it,-it)}.firstOrNull {d->
+            (1 until visibleRows-1).count {y->
+                val from=y+d
+                from in 1 until visibleRows-1 && recorded[from]?.let {sameCells(it.cells,frame.lines[y])}==true
+            }>=(visibleRows-2-kotlin.math.abs(d))/2
+        } ?: return
+        val next=arrayOfNulls<RecordedRow>(visibleRows)
+        val used=BooleanArray(visibleRows)
+        for(y in 1 until visibleRows-1) {
+            val from=y+shift
+            if(from in 1 until visibleRows-1) {next[y]=recorded[from];used[from]=true}
+        }
+        // Keep edge rows in place; release recordings that fell off.
+        next[0]=recorded[0];next[visibleRows-1]=recorded[visibleRows-1];used[0]=true;used[visibleRows-1]=true
+        for(y in recorded.indices) if(!used[y]) recorded[y]?.recording?.release()
+        recorded=next
+    }
+    /** An overscan row, drawn directly (it only shows mid-scroll). */
+    private fun drawLooseRow(canvas: Canvas,cells: List<TerminalCell>,columns: Int,origin: Float) {
+        val save=canvas.save();canvas.translate(0f,origin)
+        drawRow(canvas,cells,columns,0f,cellHeight)
+        canvas.restoreToCount(save)
     }
     private fun drawRow(canvas: Canvas,cells: List<TerminalCell>,columns: Int,top: Float,bottom: Float,pass: Int=0) {
         var start=0;var end=0;var color=0
@@ -321,17 +378,42 @@ class TerminalView(context: Context) : View(context) {
     private fun scrollByPixels(pixels: Float) {
         scrollPixels+=pixels
         val lines=(scrollPixels/cellHeight).toInt()
+        val frame=screen
+        val app=frame?.applicationScroll==true && frame.scroll.below==0L
         if(lines!=0) {
             scrollPixels-=lines*cellHeight
-            if(screen?.applicationScroll==true && screen?.scroll?.below==0L) onWheel(lines,wheelCol,wheelRow,desiredCellWidth.roundToInt(),desiredCellHeight.roundToInt())
-            else if((screen?.scroll?.available ?: 0)>0) onScroll(lines)
+            if(app) onWheel(lines,wheelCol,wheelRow,desiredCellWidth.roundToInt(),desiredCellHeight.roundToInt())
+            else if(frame!=null && frame.scroll.available>0) {
+                val from=targetOffset ?: frame.scroll.offset
+                targetOffset=(from+lines).coerceIn(0,frame.scroll.available)
+                onScroll(lines)
+            }
         }
+        val next=if(app) 0f else scrollPixels
+        if(next!=scrollRemainder || lines!=0) {scrollRemainder=next;invalidate()}
+    }
+    /**
+     * How far to slide the grid: lines asked for but not yet in the frame,
+     * plus the sub-line remainder. Clamped to the overscan rows we can show.
+     */
+    private fun slideFor(frame: TerminalScreen): Float {
+        if(selection!=null) return 0f
+        var pending=targetOffset?.let {it-frame.scroll.offset} ?: 0L
+        // Settled, or the replica went somewhere else (output, jump): stop predicting.
+        if((pending==0L && !scrolling && scrollFling.isFinished) || kotlin.math.abs(pending)>maxOf(frame.above.size,frame.below.size)+2) {targetOffset=null;pending=0}
+        val slide=pending*cellHeight+scrollRemainder
+        return slide.coerceIn(-frame.above.size*cellHeight,frame.below.size*cellHeight)
     }
     override fun computeScroll() {
         if(scrollFling.computeScrollOffset()) {
             val y=scrollFling.currY;scrollByPixels((y-lastFlingY).toFloat());lastFlingY=y
             postInvalidateOnAnimation()
+            if(scrollFling.isFinished) settleScroll()
         }
+    }
+    /** At rest the grid snaps to whole lines; lines still in flight finish sliding in. */
+    private fun settleScroll() {
+        if(scrollRemainder!=0f || scrollPixels!=0f) {scrollPixels=0f;scrollRemainder=0f;invalidate()}
     }
     override fun onDetachedFromWindow() {terminalImages.clear();clearRows();clearSelection();scrollFling.abortAnimation();touchVelocity?.recycle();touchVelocity=null;super.onDetachedFromWindow()}
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
@@ -397,7 +479,7 @@ class TerminalView(context: Context) : View(context) {
         sample.offsetLocation(event.rawX-event.x,event.rawY-event.y)
         touchVelocity?.addMovement(sample);sample.recycle()
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {pressedMouseTarget=mouseTarget();pressedMouseGrid=screen?.let {it.columns to it.rows};pressedMouse=screen?.mouseTracking==true;pressedControlled=controlled;pressedLink=linkAt(event.x,event.y);pressX=event.x;pressY=event.y;removeCallbacks(longPress);postDelayed(longPress,ViewConfiguration.getLongPressTimeout().toLong());wheelCol=((event.x-insetHorizontal)/desiredCellWidth).toInt();wheelRow=((event.y-insetTop)/desiredCellHeight).toInt();scrollFling.abortAnimation();startX=event.rawX;startY=event.rawY;lastScrollY=event.rawY;scrollPixels=0f;scrolling=false;dragging=false;paneGesture.begin(event.x, event.y)}
+            MotionEvent.ACTION_DOWN -> {pressedMouseTarget=mouseTarget();pressedMouseGrid=screen?.let {it.columns to it.rows};pressedMouse=screen?.mouseTracking==true;pressedControlled=controlled;pressedLink=linkAt(event.x,event.y);pressX=event.x;pressY=event.y;removeCallbacks(longPress);postDelayed(longPress,ViewConfiguration.getLongPressTimeout().toLong());wheelCol=((event.x-insetHorizontal)/desiredCellWidth).toInt();wheelRow=((event.y-insetTop)/desiredCellHeight).toInt();scrollFling.abortAnimation();startX=event.rawX;startY=event.rawY;lastScrollY=event.rawY;scrollPixels=0f;scrollRemainder=0f;targetOffset=null;scrolling=false;dragging=false;paneGesture.begin(event.x, event.y)}
             MotionEvent.ACTION_MOVE -> {
                 if (event.pointerCount != 1) { removeCallbacks(longPress);paneGesture.cancel();onPaneDrag?.invoke(0f,false);dragging=false;scrolling=false }
                 else {
@@ -420,7 +502,7 @@ class TerminalView(context: Context) : View(context) {
                     val minimum=-(history.offset.toDouble()*cellHeight).coerceAtMost(1000000.0).toInt()
                     val maximum=(history.below.toDouble()*cellHeight).coerceAtMost(1000000.0).toInt()
                     lastFlingY=0;scrollFling.fling(0,0,0,velocity,0,0,minimum,maximum);postInvalidateOnAnimation()
-                }
+                } else settleScroll()
                 scrolling=false;paneGesture.cancel()
             } else if(dragging && onPaneDragEnd!=null) {
                 touchVelocity?.computeCurrentVelocity(1000)

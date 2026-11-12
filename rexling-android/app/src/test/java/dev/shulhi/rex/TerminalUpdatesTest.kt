@@ -111,4 +111,37 @@ class TerminalUpdatesTest {
             assertEquals(1,decoder.decode(graphicsPacket(1)).screen!!.images.size)
         }
     }
+
+    /** RXT5 packet: [shift], changed rows (each one cell of [text]) and overscan rows. */
+    private fun rxt5(revision: Long,flag: Int,rows: Int,shift: Int,changed: Map<Int,String>,above: List<String> = emptyList(),below: List<String> = emptyList()): ByteArray {
+        val out=ByteArrayOutputStream()
+        fun number(value: Long,size: Int) {repeat(size){out.write((value ushr (8*it)).toInt() and 255)}}
+        fun text(value: String) {val bytes=value.toByteArray();number(bytes.size.toLong(),4);out.write(bytes)}
+        fun row(value: String) {number(1,2);number(0,2);number(1,1);number(0,4);number(-1,4);number(0xff000000,4);text(value);number(0,2)}
+        out.write("RXT5".toByteArray());number(revision,8);text("");number(flag.toLong(),1)
+        number(2,2);number(rows.toLong(),2);number(-1,4);number(-1,4);number(-1,4);number(0xff000000,4)
+        number(100,8);number(10,8);number(rows.toLong(),8);number(0,1)
+        number(shift.toLong(),2);number(changed.size.toLong(),2)
+        changed.forEach {(y,value)->number(y.toLong(),2);row(value)}
+        number(above.size.toLong(),1);above.forEach(::row)
+        number(below.size.toLong(),1);below.forEach(::row)
+        number(8,4);number(16,4);number(0,2);number(0,2)  // image cell size, no assets, no placements
+        number(0,2)  // no previews
+        return out.toByteArray()
+    }
+    @Test fun shiftedRowsMoveWithTheirContentAndOverscanRowsDecode() {
+        val decoder=TerminalUpdates()
+        val first=decoder.decode(rxt5(1,3,4,0,mapOf(0 to "a",1 to "b",2 to "c",3 to "d"),above=listOf("z"),below=listOf("e"))).screen!!
+        assertEquals("z",first.above.single()[0].text);assertEquals("e",first.below.single()[0].text)
+        // Content moved up one row: only the new bottom row is sent.
+        val next=decoder.decode(rxt5(2,2,4,1,mapOf(3 to "e"))).screen!!
+        assertEquals(listOf("b","c","d","e"),next.lines.map {it.single().text})
+        assertEquals(listOf(0,1,2,3),next.lines.map {it.single().y})
+        assertEquals("b",next.cells[0].text)
+        // Scrolling back down by two needs both uncovered top rows.
+        val back=decoder.decode(rxt5(3,2,4,-2,mapOf(0 to "y",1 to "z"))).screen!!
+        assertEquals(listOf("y","z","b","c"),back.lines.map {it.single().text})
+        assertTrue(runCatching {decoder.decode(rxt5(4,2,4,1,emptyMap()))}.isFailure)
+        assertTrue(runCatching {decoder.decode(rxt5(4,3,4,1,mapOf(0 to "a",1 to "b",2 to "c",3 to "d")))}.isFailure)
+    }
 }

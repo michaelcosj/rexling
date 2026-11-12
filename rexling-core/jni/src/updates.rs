@@ -70,6 +70,61 @@ fn rows(frame: &Frame) -> Vec<&[Cell]> {
     }
     result
 }
+/// Cells compare without `y`, so a row that only moved still matches.
+fn same_row(a: &[Cell], b: &[Cell]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| {
+        a.x == b.x && a.width == b.width && a.attributes == b.attributes && a.foreground == b.foreground
+            && a.background == b.background && a.text == b.text && a.hyperlink == b.hyperlink
+    })
+}
+/// Scroll distance between two frames: how far the viewport's top moved in
+/// the scrollback (scrolling, or output pushing a bottom-pinned view up).
+/// Trusted only when most of the moved rows still match.
+fn row_shift(old: &[&[Cell]], next: &[&[Cell]], previous: &Frame, frame: &Frame) -> i16 {
+    let moved = frame.scroll_offset as i64 - previous.scroll_offset as i64;
+    checked_shift(old, next, moved)
+}
+fn checked_shift(old: &[&[Cell]], next: &[&[Cell]], shift: i64) -> i16 {
+    let rows = next.len() as i64;
+    if shift == 0 || shift.abs() >= rows || shift.abs() > i64::from(i16::MAX) {return 0;}
+    let overlap: Vec<_> = (0..rows).filter(|y| (0..rows).contains(&(y + shift))).collect();
+    let same = overlap.iter().filter(|y| same_row(old[(**y + shift) as usize], next[**y as usize])).count();
+    if same * 2 >= overlap.len() {shift as i16} else {0}
+}
+fn encode_row(out: &mut Vec<u8>, row: &[Cell]) {
+    u16le(out, row.len() as u16);
+    for cell in row {
+            u16le(out, cell.x);
+            out.push(cell.width);
+            u32le(out, cell.attributes);
+            u32le(out, rgb(cell.foreground));
+            u32le(out, rgb(cell.background));
+            text(out, &cell.text);
+        }
+        // Sparse contiguous link ranges keep ordinary rows cheap.
+        let mut links: Vec<(u16, u16, &str)> = Vec::new();
+        for cell in row {
+            if cell.width == 0 {
+                continue;
+            }
+            if let Some(uri) = cell.hyperlink.as_deref() {
+                if let Some(last) = links
+                    .last_mut()
+                    .filter(|last| last.1 == cell.x && last.2 == uri)
+                {
+                    last.1 = cell.x + u16::from(cell.width);
+                } else {
+                    links.push((cell.x, cell.x + u16::from(cell.width), uri));
+                }
+            }
+        }
+        u16le(out, links.len() as u16);
+        for (start, end, uri) in links {
+            u16le(out, start);
+            u16le(out, end);
+            text(out, uri);
+        }
+}
 fn encode_frame(out: &mut Vec<u8>, frame: &Frame, previous: Option<&Frame>) {
     out.push(if previous.is_some() { 2 } else { 3 });
     u16le(out, frame.columns);
@@ -91,46 +146,30 @@ fn encode_frame(out: &mut Vec<u8>, frame: &Frame, previous: Option<&Frame>) {
     out.push(frame.input_flags);
     let next = rows(frame);
     let old = previous.map(|old| rows(old));
+    // RXT5 shift: content moved by `shift` rows (positive: up). The decoder
+    // moves its rows first, so only rows that are really new are sent.
+    let shift = old.as_ref().zip(previous).map_or(0, |(old, previous)| row_shift(old, &next, previous, frame));
+    out.extend(shift.to_le_bytes());
+    let base = |y: usize| -> Option<&[Cell]> {
+        let old = old.as_ref()?;
+        let from = y as i64 + i64::from(shift);
+        (from >= 0 && (from as usize) < old.len()).then(|| old[from as usize])
+    };
     let changed: Vec<_> = next
         .iter()
         .enumerate()
-        .filter(|(y, row)| old.as_ref().is_none_or(|old| old[*y] != **row))
+        .filter(|(y, row)| base(*y).is_none_or(|old| !same_row(old, row)))
         .collect();
     u16le(out, changed.len() as u16);
     for (y, row) in changed {
         u16le(out, y as u16);
-        u16le(out, row.len() as u16);
-        for cell in *row {
-            u16le(out, cell.x);
-            out.push(cell.width);
-            u32le(out, cell.attributes);
-            u32le(out, rgb(cell.foreground));
-            u32le(out, rgb(cell.background));
-            text(out, &cell.text);
-        }
-        // Sparse contiguous link ranges keep ordinary rows cheap.
-        let mut links: Vec<(u16, u16, &str)> = Vec::new();
-        for cell in *row {
-            if cell.width == 0 {
-                continue;
-            }
-            if let Some(uri) = cell.hyperlink.as_deref() {
-                if let Some(last) = links
-                    .last_mut()
-                    .filter(|last| last.1 == cell.x && last.2 == uri)
-                {
-                    last.1 = cell.x + u16::from(cell.width);
-                } else {
-                    links.push((cell.x, cell.x + u16::from(cell.width), uri));
-                }
-            }
-        }
-        u16le(out, links.len() as u16);
-        for (start, end, uri) in links {
-            u16le(out, start);
-            u16le(out, end);
-            text(out, uri);
-        }
+        encode_row(out, row);
+    }
+    // RXT5: spare rows around the viewport for smooth scrolling. Sent in full;
+    // there are at most a few on each side.
+    for side in [&frame.above, &frame.below] {
+        out.push(side.len() as u8);
+        for row in side {encode_row(out, row);}
     }
     u32le(out, frame.image_cell_width);
     u32le(out, frame.image_cell_height);
@@ -173,7 +212,7 @@ pub fn encode(state: &mut Shared, after: u64) -> Vec<u8> {
     }
     let base = &state.wire;
     let reset = after != base.revision || base.key != state.key;
-    let mut out = b"RXT4".to_vec();
+    let mut out = b"RXT5".to_vec();
     u64le(&mut out, state.revision);
     let previews: Vec<_> = std::mem::take(&mut state.pending_previews)
         .into_iter()
@@ -275,6 +314,8 @@ mod wire_tests {
             image_cell_width: 8,
             image_cell_height: 16,
             images: Vec::new(),
+            above: Vec::new(),
+            below: Vec::new(),
         }
     }
     #[test]
@@ -342,7 +383,7 @@ mod wire_tests {
             activity: Arc::default(),
         };
         let full = encode(&mut state, 0);
-        assert_eq!(&full[..4], b"RXT4");
+        assert_eq!(&full[..4], b"RXT5");
         assert_eq!(
             full.windows(b"https://example.com/one".len())
                 .filter(|w| *w == b"https://example.com/one")
@@ -394,6 +435,43 @@ mod wire_tests {
         assert!(metadata(&encode(&mut state, 2))["activity"].is_null());
         state.revision = 4;
         assert!(metadata(&encode(&mut state, 1))["activity"].is_null());
+    }
+    fn scrolled(offset: u64) -> Frame {
+        // Rows show scrollback line numbers: row y shows line offset+y.
+        let mut f = frame();
+        f.scroll_total = 1000;
+        f.scroll_offset = offset;
+        for c in &mut f.cells {c.text = format!("{}", (offset + u64::from(c.y)) % 10);c.attributes = (offset + u64::from(c.y)) as u32;}
+        f
+    }
+    fn shift_and_rows(packet: &[u8]) -> (i16, u16) {
+        // Header: magic 4, revision 8, metadata len 4 (+ bytes), flag 1, cols 2, rows 2, cursor 8, colors 8, scroll 24, input 1.
+        let meta = u32::from_le_bytes(packet[12..16].try_into().unwrap()) as usize;
+        let at = 16 + meta + 1 + 2 + 2 + 8 + 8 + 24 + 1;
+        (i16::from_le_bytes(packet[at..at + 2].try_into().unwrap()), u16::from_le_bytes(packet[at + 2..at + 4].try_into().unwrap()))
+    }
+    #[test]
+    fn scrolling_sends_a_shift_and_only_the_new_rows() {
+        let mut state = Shared {
+            revision: 1, json: "{}".into(), pending_previews: BTreeMap::new(),
+            frame: Some(Arc::new(scrolled(100))), key: "a".into(), wire: WireBase::default(), activity: Arc::default(),
+        };
+        let full = encode(&mut state, 0);
+        assert_eq!(shift_and_rows(&full), (0, 50));
+        // Scroll down 3 lines: rows move up by 3, three new rows at the bottom.
+        state.frame = Some(Arc::new(scrolled(103)));
+        state.revision = 2;
+        let delta = encode(&mut state, 1);
+        assert_eq!(shift_and_rows(&delta), (3, 3));
+        assert!(delta.len() < full.len() / 10, "{} vs {}", delta.len(), full.len());
+        // Scroll back up 2: shift -2, two new rows at the top.
+        state.frame = Some(Arc::new(scrolled(101)));
+        state.revision = 3;
+        assert_eq!(shift_and_rows(&encode(&mut state, 2)), (-2, 2));
+        // A jump larger than the screen is a full repaint, no shift.
+        state.frame = Some(Arc::new(scrolled(500)));
+        state.revision = 4;
+        assert_eq!(shift_and_rows(&encode(&mut state, 3)), (0, 50));
     }
 }
 
