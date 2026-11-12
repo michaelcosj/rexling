@@ -45,7 +45,7 @@ import dev.chrisbanes.haze.hazeSource
     val haze=hazeState ?: localHaze
     // Our padding preference sets the pager strip; a floating dock needs room of its own.
     val pagerHeight=padding.pagedBottom.coerceAtLeast(10)
-    val bottomPadding=maxOf(if(blocks.size>1) pagerHeight else padding.bottom,if(bottomControlsInset>0.dp) 36 else 0)
+    val bottomPadding=maxOf(if(blocks.size>1) pagerHeight else padding.bottom,if(bottomControlsInset>0.dp) 28 else 0)
     val palette=LocalTerminalPalette.current
     val backdrop=MaterialTheme.colorScheme.background
     val scope=rememberCoroutineScope()
