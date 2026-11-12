@@ -56,7 +56,7 @@ jobs:
 
       - name: Kotlin unit tests and instrumented-test compile
         working-directory: rexling-android
-        run: ./gradlew --no-daemon :app:testReleaseUnitTest :app:compileDebugAndroidTestKotlin
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin
 
       - uses: actions/upload-artifact@v7
         if: failure()

@@ -76,9 +76,9 @@ class TerminalView(context: Context) : View(context) {
     private var wheelRow=0
     var onPaneSwipe: (Int) -> Unit = {}
     var onDimensions: (Int, Int) -> Unit = { _, _ -> }
+        set(value) {val changed=field!=value;field=value;if(changed && width>0 && height>0) reportDimensions(force=true)}
     /** Device-pixel cell size, so the server sizes kitty images for our real cells. */
     val cellPixels: Pair<Int,Int> get()=desiredCellWidth.roundToInt().coerceIn(1,4096) to desiredCellHeight.roundToInt().coerceIn(1,4096)
-        set(value) {val changed=field!=value;field=value;if(changed && width>0 && height>0) reportDimensions(force=true)}
     private var currentScreen: TerminalScreen?=null
     var screen: TerminalScreen?
         get()=currentScreen

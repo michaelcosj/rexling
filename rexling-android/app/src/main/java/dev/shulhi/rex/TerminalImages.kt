@@ -11,7 +11,7 @@ import java.nio.ByteBuffer
  * One kitty graphics placement, positioned by libghostty. Sizes are in the
  * replica's cell pixels ([TerminalImages.cellWidth]/[TerminalImages.cellHeight]).
  */
-internal data class TerminalImagePlacement(
+data class TerminalImagePlacement(
     val imageId: Int,val generation: Long,val layer: Int,val z: Int,
     val col: Int,val row: Int,val cols: Int,val rows: Int,val offsetX: Int,val offsetY: Int,val width: Int,val height: Int,
     val sourceX: Int,val sourceY: Int,val sourceWidth: Int,val sourceHeight: Int,
@@ -25,7 +25,7 @@ internal data class TerminalImagePlacement(
  * Premultiplied RGBA pixels for one image generation. The Bitmap is made on
  * first draw (main thread) and the byte array is released after that.
  */
-internal class TerminalImagePixels(val width: Int,val height: Int,premultipliedRgba: ByteArray) {
+class TerminalImagePixels(val width: Int,val height: Int,premultipliedRgba: ByteArray) {
     private var pixels: ByteArray?=premultipliedRgba
     private var bitmap: Bitmap?=null
     fun bitmap(): Bitmap? {
@@ -48,7 +48,7 @@ internal class TerminalImagePixels(val width: Int,val height: Int,premultipliedR
 }
 
 /** Placements in draw order plus the pixels they reference. Immutable per frame. */
-internal class TerminalImages(val cellWidth: Int,val cellHeight: Int,val placements: List<TerminalImagePlacement>,val pixels: Map<Pair<Int,Long>,TerminalImagePixels>) {
+class TerminalImages(val cellWidth: Int,val cellHeight: Int,val placements: List<TerminalImagePlacement>,val pixels: Map<Pair<Int,Long>,TerminalImagePixels>) {
     val isEmpty: Boolean get()=placements.isEmpty()
     /**
      * Draw one layer. The canvas is already translated to the grid origin and
@@ -67,7 +67,8 @@ internal class TerminalImages(val cellWidth: Int,val cellHeight: Int,val placeme
             canvas.drawBitmap(bitmap,source,target,paint)
         }
     }
-    private val source=Rect();private val destination=RectF()
+    // Lazy: JVM unit tests build TerminalImages without Android graphics classes.
+    private val source by lazy {Rect()};private val destination by lazy {RectF()}
     private fun target(p: TerminalImagePlacement,cw: Float,ch: Float,sx: Float,sy: Float): RectF? {
         if(p.sourceWidth<=0 || p.sourceHeight<=0 || p.width<=0 || p.height<=0) return null
         val left=p.col*cw+p.offsetX*sx;val top=p.row*ch+p.offsetY*sy
