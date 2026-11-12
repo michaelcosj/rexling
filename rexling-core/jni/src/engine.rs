@@ -226,6 +226,8 @@ struct Actor {
     retry: Option<tokio::time::Instant>,
     backoff: u64,
     dirty: bool,
+    /// Next kitty animation frame, while one is playing in the selected pane.
+    animation_at: Option<tokio::time::Instant>,
     preview_task: Option<PreviewTask>,
     summary_task: Option<SummaryTask>,
     activity_open: bool,
@@ -290,6 +292,7 @@ impl Actor {
             retry: None,
             backoff: 1,
             dirty: false,
+            animation_at: None,
             preview_task: None,
             summary_task: None,
             activity_open:false,monitoring:false,activity_task:None,activity_refresh:tokio::time::Instant::now(),
@@ -444,7 +447,10 @@ impl Actor {
                     self.program_task=None;
                     if let Ok(details)=result {self.apply_program_details(details);self.publish();}
                 },
-                _=async {if active {tokio::time::sleep_until(if self.dirty && self.visible {render_at}else{maintenance_at}).await;}else{pending::<()>().await;}}=>{
+                _=async {if active {
+                    let wake=if self.dirty && self.visible {render_at} else {maintenance_at};
+                    let wake=match self.animation_at {Some(at) if self.visible=>wake.min(at.max(render_at)),_=>wake};
+                    tokio::time::sleep_until(wake).await;}else{pending::<()>().await;}}=>{
                     let now=tokio::time::Instant::now();
                     render_at=now+Duration::from_millis(16);
                     maintenance_at=now+Duration::from_secs(1);
@@ -476,6 +482,7 @@ impl Actor {
                         self.program_refresh=tokio::time::Instant::now()+Duration::from_secs(4);
                     }
                     if self.predictor.expire(std::time::Instant::now()) {self.dirty=true;}
+                    if self.animation_at.is_some_and(|at|at<=now) {self.animation_at=None;self.dirty=true;}
                     if self.dirty && self.visible {
                         self.dirty=false;
                         if let Some(replica)=self.replica.as_mut().filter(|r|r.ready()) {
@@ -485,6 +492,8 @@ impl Actor {
                                     let target=self.input_target();
                                     self.predictor.retarget(&prediction_key(&target));
                                     self.predictor.observe(frame.clone(),std::time::Instant::now());
+                                    if let Some(delay)=frame.animation_delay_ms {self.animation_at=Some(tokio::time::Instant::now()+Duration::from_millis(delay.max(16)));}
+                                    else {self.animation_at=None;}
                                     self.screen=Some(self.predictor.display(frame));self.publish_frame();
                                 }
                                 Err(e)=>{self.error=e.to_string();self.publish();}
@@ -1271,7 +1280,7 @@ impl Actor {
                 if let (Some(columns),Some(rows))=(value["columns"].as_u64(),value["rows"].as_u64())
                     && columns>0 && rows>0 {
                     self.control.as_mut().context("not connected")?.terminal(&self.selected_session,&self.selected_block,"resize",
-                        json!({"columns":columns.clamp(1,512),"rows":rows.clamp(1,256)})).await?;
+                        resize_args(columns,rows,&value)).await?;
                 }
             }
             "release" => {
@@ -1346,7 +1355,7 @@ impl Actor {
                     _=>{
                         let cols=value["columns"].as_u64().context("columns required")?.clamp(1,512);
                         let rows=value["rows"].as_u64().context("rows required")?.clamp(1,256);
-                        c.terminal(&self.selected_session,&self.selected_block,"resize",json!({"columns":cols,"rows":rows})).await
+                        c.terminal(&self.selected_session,&self.selected_block,"resize",resize_args(cols,rows,&value)).await
                     }
                 };
                 if let Err(e) = result {
@@ -1749,6 +1758,15 @@ fn summary_task(endpoint: Endpoint, sessions: Value, own: String) -> SummaryTask
 fn rgb(rgb: [u8; 3]) -> u32 {
     ((rgb[0] as u32) << 16) | ((rgb[1] as u32) << 8) | rgb[2] as u32
 }
+/// Terminal resize arguments. Cell pixels let programs size kitty images for
+/// our real cells; Rex requires both or neither.
+fn resize_args(columns: u64,rows: u64,value: &Value) -> Value {
+    let mut args=json!({"columns":columns.clamp(1,512),"rows":rows.clamp(1,256)});
+    if let (Some(w),Some(h))=(value["cellWidth"].as_u64(),value["cellHeight"].as_u64()) && w>0 && h>0 {
+        args["cell_width_px"]=json!(w.min(4096));args["cell_height_px"]=json!(h.min(4096));
+    }
+    args
+}
 fn frame_json(frame: Frame) -> Value {frame_value(&frame)}
 fn frame_value(frame: &Frame) -> Value {
     let cells: Vec<Value> = frame
@@ -1778,6 +1796,8 @@ mod tests {
         let windows=json!([{"id":"w","blocks":[{"id":"a"},{"id":"b"},{"id":"f"}],"layout":[{"id":"a","floating":false},{"id":"b","floating":false},{"id":"f","floating":true}]}]);
         let command=|kind:&str,id:&str|json!({"type":kind,"session":"s","window":"w","id":id,"label":"  Logs 🦀  ","anchor":"a","direction":"below"});
         let (method,args)=terminal_edit_call(&windows,"s",&command("rename_tab","w")).unwrap();assert_eq!(method,"session.set_window_label");assert_eq!(args["label"],"Logs 🦀");
+        assert_eq!(resize_args(80,24,&json!({"cellWidth":21,"cellHeight":44})),json!({"columns":80,"rows":24,"cell_width_px":21,"cell_height_px":44}));
+        assert_eq!(resize_args(900,24,&json!({"cellWidth":21})),json!({"columns":512,"rows":24}),"both or neither");
         assert_eq!(terminal_edit_call(&windows,"s",&command("rename_pane","b")).unwrap().0,"session.set_block_label");
         assert_eq!(terminal_edit_call(&windows,"s",&command("float_pane","b")).unwrap().0,"session.float_block");
         let (_,args)=terminal_edit_call(&windows,"s",&command("dock_pane","f")).unwrap();assert_eq!(args["anchor_block_id"],"a");assert_eq!(args["direction"],"vertical");
