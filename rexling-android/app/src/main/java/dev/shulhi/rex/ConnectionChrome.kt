@@ -30,10 +30,15 @@ internal fun connectionMessage(phase: String,network: Boolean?): String? = when 
         }
     }
 }
-@Composable internal fun OtherOwnerNotice(block: String,otherOwner: Boolean,ready: Boolean,dimensions: Pair<Int,Int>?,onTake: ()->Unit,modifier: Modifier=Modifier) {
+@Composable internal fun OtherOwnerNotice(block: String,otherOwner: Boolean,ready: Boolean,dimensions: Pair<Int,Int>?,onTake: ()->Unit,modifier: Modifier=Modifier,hazeState: dev.chrisbanes.haze.HazeState?=null,onVisibleChange: (Boolean)->Unit={}) {
     var visible by remember(block) {mutableStateOf(false)}
     LaunchedEffect(block,otherOwner,ready) {visible=false;if(otherOwner && ready) {delay(350);visible=true}}
-    if(visible && otherOwner && ready) Row(modifier.clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.96f)).padding(start=11.dp,end=8.dp),
+    val showing=visible && otherOwner && ready
+    val notify by rememberUpdatedState(onVisibleChange)
+    val localHaze=remember {dev.chrisbanes.haze.HazeState()}
+    LaunchedEffect(showing) {notify(showing)}
+    DisposableEffect(Unit) {onDispose {notify(false)}}
+    if(showing) Row(modifier.paneFrost(hazeState ?: localHaze,RoundedCornerShape(18.dp),edge=false).padding(start=11.dp,end=8.dp),
         verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(7.dp)) {
         Text("Sized by another client"+(dimensions?.let {" · ${it.first}×${it.second}"} ?: ""),fontSize=10.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Take over",Modifier.clickable(onClick=onTake).padding(vertical=9.dp),fontSize=10.sp,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.primary)
@@ -42,11 +47,15 @@ internal fun connectionMessage(phase: String,network: Boolean?): String? = when 
 @Composable internal fun OwnershipMenuItem(controlled: Boolean,enabled: Boolean,onClick: ()->Unit) {
     TerminalMenuItem(if(controlled) "Release control" else "Take control",ChromeIcon.POINTER,enabled=enabled,onClick=onClick)
 }
-@Composable internal fun ReadyNotice(epoch: Long,controlled: Boolean,ready: Boolean,modifier: Modifier=Modifier) {
+@Composable internal fun ReadyNotice(epoch: Long,controlled: Boolean,ready: Boolean,modifier: Modifier=Modifier,hazeState: dev.chrisbanes.haze.HazeState?=null,onVisibleChange: (Boolean)->Unit={}) {
     var shown by remember {mutableLongStateOf(0)};var visible by remember {mutableStateOf(false)}
     LaunchedEffect(epoch,controlled,ready) {
         if(epoch>shown && controlled && ready) {shown=epoch;visible=true;try {delay(1400)} finally {visible=false}}
     }
-    if(visible) Text("Ready to type",modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal=12.dp,vertical=5.dp),
+    val notify by rememberUpdatedState(onVisibleChange)
+    val localHaze=remember {dev.chrisbanes.haze.HazeState()}
+    LaunchedEffect(visible) {notify(visible)}
+    DisposableEffect(Unit) {onDispose {notify(false)}}
+    if(visible) Text("Ready to type",modifier.paneFrost(hazeState ?: localHaze,RoundedCornerShape(12.dp),tint=MaterialTheme.colorScheme.primaryContainer,edge=false).padding(horizontal=12.dp,vertical=5.dp),
         fontSize=10.sp,color=MaterialTheme.colorScheme.onPrimaryContainer)
 }

@@ -4,6 +4,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
@@ -43,7 +47,7 @@ class KeyboardBarTest {
         ui.setContent {
             var shift by remember {mutableStateOf(ShiftKeyState())}
             MaterialTheme {
-                Box(Modifier.width(width).testTag("Keyboard test area")) {
+                Box(Modifier.width(width).statusBarsPadding().testTag("Keyboard test area")) {
                     KeyboardBar(controlled(),ready,false,false,shift.active,true,{},{},
                         {shift=ShiftKeyState(latched=!shift.active)},
                         {shift=shift.press()},{shift=shift.release(it)},
@@ -308,7 +312,7 @@ class KeyboardBarTest {
     @Test fun compactAndFullJoystickStayCenteredAtTheBottomAndSteerFromTheVisibleCenter() {
         val keyboardVisible=mutableStateOf(false)
         ui.setContent {MaterialTheme {
-            Box(Modifier.fillMaxSize().padding(top=40.dp,bottom=if(keyboardVisible.value) 220.dp else 0.dp)
+            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(top=40.dp,bottom=if(keyboardVisible.value) 220.dp else 0.dp)
                 .semantics {contentDescription="Precision joystick area"},contentAlignment=Alignment.BottomCenter) {
                 Box(Modifier.width(360.dp)) {
                     KeyboardBar(true,true,false,false,false,keyboardVisible.value,{},{},{},{},{},{sent+=it},onKeyboard={})

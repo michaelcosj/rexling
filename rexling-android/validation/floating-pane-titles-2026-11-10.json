@@ -1,0 +1,27 @@
+{
+  "build": 91,
+  "date": "2026-11-10",
+  "android_tests_passed": 12,
+  "jvm_tests_passed": 160,
+  "jvm_optional_skipped": 1,
+  "release_lint_packaging_verified": true,
+  "changes": [
+    "Expanded floating panes show content-sized title pills with icons on the right",
+    "Collapsed stack uses the primary selection container while a floating pane is open",
+    "Selected expanded row is highlighted",
+    "Indicator strip and terminal bottom inset reduced from 40 to 36 dp",
+    "Terminal-to-tab gap reduced from 7 to 3 dp",
+    "Merged PR #1 Shift+Enter fix included"
+  ],
+  "visual_review": "Light-theme expanded title pills and selected stack",
+  "sha256": "a43762ac04d72d5e40c9dddd1e5875ed00093e687e42de9728d27f0d448cbe41",
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 91,
+    "sha256": "a43762ac04d72d5e40c9dddd1e5875ed00093e687e42de9728d27f0d448cbe41",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  }
+}

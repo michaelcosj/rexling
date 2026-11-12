@@ -35,4 +35,15 @@ class ServersTest {
         assertTrue(SavedServers.decode(null,"invalid").isEmpty())
     }
 
+    @Test fun serverIconsPersistWithoutChangingIdentityOrEndpoint() {
+        val profiles=ServerIcon.entries.mapIndexed {index,icon->ServerProfile.create("Host $index","https://host$index","id$index",icon)}
+        assertEquals(profiles,SavedServers.decode(SavedServers.encode(profiles),""))
+    }
+    @Test fun oldAndUnknownIconValuesKeepTheServerAndDefaultToGlobe() {
+        val json="""[{"id":"old","label":"Old","endpoint":"https://old"},{"id":"new","label":"New","endpoint":"https://new","icon":"future-icon"}]"""
+        val decoded=SavedServers.decode(json,"")
+        assertEquals(listOf("old","new"),decoded.map {it.id})
+        assertTrue(decoded.all {it.icon==ServerIcon.GLOBE})
+    }
+
 }

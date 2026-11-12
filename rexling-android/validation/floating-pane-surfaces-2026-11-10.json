@@ -1,0 +1,22 @@
+{
+  "build": 92,
+  "date": "2026-11-10",
+  "android_tests_passed": 3,
+  "release_lint_packaging_verified": true,
+  "visual_review": "Light-theme expanded title pills with soft shadows and selected stack",
+  "changes": [
+    "Rounded opaque surface behind collapsed icon-only stack",
+    "4dp soft shadows on stack and expanded title pills",
+    "Padding around scroll content and unclipped fan animation preserve shadows",
+    "Active primary-container highlights preserved"
+  ],
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 92,
+    "sha256": "49c82b466ba97d30ae051a700461b6d1d114501bda2bfd078fdd49e77b629dd5",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  }
+}

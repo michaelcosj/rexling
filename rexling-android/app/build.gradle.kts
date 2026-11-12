@@ -29,7 +29,7 @@ android {
         applicationId = "dev.shulhi.rex"
         minSdk = 28
         targetSdk = 37
-        versionCode = 87
+        versionCode = 105
         versionName = dateVersion
         buildConfigField("String","GIT_REVISION","\"$revision\"")
         buildConfigField("boolean","LOCAL_CHANGES",modified.toString())
@@ -79,6 +79,7 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.08.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    implementation("dev.chrisbanes.haze:haze:1.5.4")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui")

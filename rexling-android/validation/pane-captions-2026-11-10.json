@@ -1,0 +1,20 @@
+{
+  "build": 97,
+  "date": "2026-11-10",
+  "android_tests_passed": 14,
+  "release_lint_packaging_verified": true,
+  "changes": [
+    "Separate minimap with no shared surrounding card",
+    "Caption uses top-bar title and directory on two lines",
+    "Expanded floating menu shows title and directory on one line; icon-only toggle unchanged"
+  ],
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 97,
+    "sha256": "c9705025aeb372ef331a5841b445d694edfca3d5e9de0f46a46c2c0b5acba08a",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  }
+}

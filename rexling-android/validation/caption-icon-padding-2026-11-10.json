@@ -1,0 +1,20 @@
+{
+  "build": 102,
+  "date": "2026-11-10",
+  "change": "Swipe-caption icon uses its painted tile directly, fills the two-line text height, and shares the same 6dp horizontal/4dp vertical outer padding. Removes reserved ProgramStack slot in this caption only.",
+  "checks": [
+    "Existing native terminal backdrop and typography instrumentation test passed",
+    "Caption screenshot visually reviewed",
+    "Release build, lint, signature, JNI exports and 16KB alignment passed"
+  ],
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 102,
+    "sha256": "40642a6853d8d21875625b9ae01801840232cf46747f6a5365787f3fb8ac52ef",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  },
+  "sha256": "40642a6853d8d21875625b9ae01801840232cf46747f6a5365787f3fb8ac52ef"
+}

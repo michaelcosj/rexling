@@ -1,0 +1,16 @@
+{
+  "build": 99,
+  "date": "2026-11-10",
+  "change": "Swipe caption padding: horizontal 12dp to 6dp, vertical 6dp to 4dp",
+  "release_lint_packaging_verified": true,
+  "tests": "Existing interaction tests not repeated for padding-only change",
+  "installation": {
+    "device": "100.97.157.23:36045",
+    "model": "SM-S906E",
+    "version_code": 99,
+    "sha256": "283014b609a6c8768c7124459dccd3cbd52acdd36aac29813e4e9582329ea00c",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "wireless ADB"
+  }
+}

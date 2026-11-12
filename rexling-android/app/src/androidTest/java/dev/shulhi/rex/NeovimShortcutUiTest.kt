@@ -26,6 +26,7 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import java.io.File
+import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -37,6 +38,40 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class NeovimShortcutUiTest {
     @get:Rule val ui=createComposeRule()
+    @Test fun wheelSamplesTheLiveBackdropAndReleasesCaptureWhenClosed() {
+        val backdrop=mutableStateOf(androidx.compose.ui.graphics.Color.Red)
+        var capturing=false
+        ui.setContent {MaterialTheme {
+            val haze=remember {dev.chrisbanes.haze.HazeState()}
+            Box(Modifier.fillMaxSize()) {
+                androidx.compose.foundation.Canvas(Modifier.fillMaxSize().hazeSource(haze)) {drawRect(backdrop.value)}
+                NeovimShortcutButton(NeovimShortcuts.defaults,"one",true,{_,_->},{},
+                    layout=NeovimShortcutLayout.CIRCULAR,effect=NeovimShortcutEffect.NONE,
+                    position=Offset(.5f,.5f),hazeState=haze,onExpandedChange={capturing=it})
+            }
+        }}
+        ui.onNodeWithContentDescription("Neovim shortcuts").performClick()
+        ui.runOnIdle {assertTrue(capturing)}
+        val bounds=nativeBounds("Neovim shortcut menu")
+        fun pixel(x: Float,y: Float): Int {
+            ui.waitForIdle();SystemClock.sleep(100)
+            val shot=InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()!!
+            return shot.getPixel((bounds.left+bounds.width()*x).toInt(),(bounds.top+bounds.height()*y).toInt()).also {shot.recycle()}
+        }
+        val red=pixel(.5f,.08f)
+        assertTrue("Wheel must sample the red backdrop: $red",android.graphics.Color.red(red)>android.graphics.Color.green(red)+35)
+        // The neutral gap remains transparent rather than gaining a solid annulus.
+        val gap=pixel(.5f,.28f)
+        assertTrue(android.graphics.Color.red(gap)>200)
+        ui.runOnIdle {backdrop.value=androidx.compose.ui.graphics.Color.Green}
+        val green=pixel(.5f,.08f)
+        assertTrue("Open wheel must follow backdrop changes: $green",android.graphics.Color.green(green)>android.graphics.Color.red(green)+35)
+        val shot=InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()!!
+        File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,"neovim-wheel-frost.png").outputStream().use {shot.compress(Bitmap.CompressFormat.PNG,100,it)}
+        shot.recycle()
+        ui.onNodeWithContentDescription("Close Neovim shortcuts").performClick()
+        ui.runOnIdle {assertFalse(capturing)}
+    }
     @Test fun menuSelectsNamedKeysForItsCapturedPaneAndCanOpenCustomization() {
         val sent=mutableListOf<Pair<NeovimShortcut,String>>()
         var customized=false

@@ -13,12 +13,12 @@ import org.junit.runner.RunWith
 class ConnectionChromeTest {
     @get:Rule val ui=createComposeRule()
     @Test fun takeoverNoticeIsContextualAndDisappearsWhenTheOtherOwnerLeaves() {
-        val other=mutableStateOf(true);var takes=0
-        ui.setContent {MaterialTheme {OtherOwnerNotice("b",other.value,true,67 to 25,{takes++})}}
+        val other=mutableStateOf(true);var takes=0;var capture=false
+        ui.setContent {MaterialTheme {OtherOwnerNotice("b",other.value,true,67 to 25,{takes++},onVisibleChange={capture=it})}}
         ui.mainClock.autoAdvance=false;ui.mainClock.advanceTimeBy(450)
         ui.onNodeWithText("Sized by another client · 67×25").assertIsDisplayed()
-        ui.onNodeWithText("Take over").performClick();ui.runOnIdle {assertEquals(1,takes);other.value=false}
-        ui.mainClock.advanceTimeByFrame();ui.onNodeWithText("Take over").assertDoesNotExist()
+        ui.onNodeWithText("Take over").performClick();ui.runOnIdle {assertTrue(capture);assertEquals(1,takes);other.value=false}
+        ui.mainClock.advanceTimeByFrame();ui.onNodeWithText("Take over").assertDoesNotExist();ui.runOnIdle {assertFalse(capture)}
     }
     @Test fun cancelledOwnershipNoticeDoesNotResurrectAfterItsDelay() {
         val other=mutableStateOf(true)

@@ -28,13 +28,27 @@ def shapes(node):
     if kind == "path":
         return node.attrib["d"]
     if kind == "rect":
-        assert not node.get("rx") and not node.get("ry")
         x, y, w, h = [number(node.get(k, 0)) for k in ("x", "y", "width", "height")]
+        rx = number(node.get("rx", node.get("ry", 0)))
+        ry = number(node.get("ry", rx))
+        if rx > 0 or ry > 0:
+            rx = min(rx, w / 2)
+            ry = min(ry, h / 2)
+            return f"M{x+rx},{y}h{w-2*rx}a{rx},{ry} 0 0 1 {rx},{ry}v{h-2*ry}a{rx},{ry} 0 0 1 {-rx},{ry}h{-(w-2*rx)}a{rx},{ry} 0 0 1 {-rx},{-ry}v{-(h-2*ry)}a{rx},{ry} 0 0 1 {rx},{-ry}Z"
         return f"M{x},{y}h{w}v{h}h{-w}Z"
     if kind in ("polygon", "polyline"):
         points = re.findall(r"[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?", node.attrib["points"])
         assert len(points) % 2 == 0
         return "M" + "L".join(",".join(points[i:i+2]) for i in range(0, len(points), 2)) + ("Z" if kind == "polygon" else "")
+    if kind == "circle":
+        cx, cy, r = [number(node.get(k, 0)) for k in ("cx", "cy", "r")]
+        return f"M{cx-r},{cy}a{r},{r} 0 1,0 {2*r},0a{r},{r} 0 1,0 {-2*r},0Z"
+    if kind == "ellipse":
+        cx, cy, rx, ry = [number(node.get(k, 0)) for k in ("cx", "cy", "rx", "ry")]
+        return f"M{cx-rx},{cy}a{rx},{ry} 0 1,0 {2*rx},0a{rx},{ry} 0 1,0 {-2*rx},0Z"
+    if kind == "line":
+        x1, y1, x2, y2 = [number(node.get(k, 0)) for k in ("x1", "y1", "x2", "y2")]
+        return f"M{x1},{y1}L{x2},{y2}"
     raise ValueError(f"Unsupported shape: {kind}")
 
 
@@ -49,13 +63,17 @@ def compile_icon(root):
     def draw(node, inherited, definitions, ink=None, opacity=1):
         kind = tag(node)
         assert node.get("filter") is None, "SVG filters are not supported"
-        assert node.get("stroke") in (None, "none"), "Stroked SVG shapes are not supported"
-        for declaration in node.get("style", "").split(";"):
-            assert not declaration.strip() or declaration.strip().replace(" ", "") in ("mix-blend-mode:normal", "isolation:isolate", "mask-type:alpha"), declaration
         if kind in ("defs", "title", "desc"):
             return
         style = inherited.copy()
-        style.update({k: node.attrib[k] for k in ("fill", "fill-opacity", "fill-rule") if k in node.attrib})
+        if "style" in node.attrib:
+            for item in node.attrib["style"].split(";"):
+                if ":" in item:
+                    k, v = item.split(":", 1)
+                    k, v = k.strip(), v.strip()
+                    if k in ("fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity", "stroke-linecap", "stroke-linejoin"):
+                        style[k] = v
+        style.update({k: node.attrib[k] for k in ("fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity", "stroke-linecap", "stroke-linejoin") if k in node.attrib})
         opacity *= float(node.get("opacity", 1))
         commands.append({"op": "save"})
         if node.get("transform"):
@@ -70,8 +88,7 @@ def compile_icon(root):
             href = image.get("href", "")
             assert href.startswith("data:image/svg+xml;base64,")
             logo = ET.fromstring(base64.b64decode(href.split(",", 1)[1]))
-            assert len(node) == 1 and tag(node[0]) == "rect"
-            color = node[0].attrib["fill"]
+            color = node[0].attrib["fill"] if len(node) > 0 and "fill" in node[0].attrib else ink or "#ffffff"
             x, y, w, h = [number(image.get(k)) for k in ("x", "y", "width", "height")]
             vx, vy, vw, vh = map(float, logo.attrib["viewBox"].split())
             scale = min(w/vw, h/vh)
@@ -79,11 +96,29 @@ def compile_icon(root):
                              {"op": "scale", "x": scale, "y": scale},
                              {"op": "translate", "x": -vx, "y": -vy}])
             draw(logo, {}, {x.get("id"): x for x in logo.iter() if x.get("id")}, color, opacity)
+        elif kind == "image":
+            href = node.get("href", node.get("{http://www.w3.org/1999/xlink}href", ""))
+            assert href.startswith("data:image/svg+xml;base64,"), "Only embedded vector images are supported"
+            logo = ET.fromstring(base64.b64decode(href.split(",", 1)[1]))
+            x, y, w, h = [number(node.get(k, 0)) for k in ("x", "y", "width", "height")]
+            vx, vy, vw, vh = map(float, logo.attrib["viewBox"].split())
+            scale = min(w/vw, h/vh)
+            commands.extend([{"op": "translate", "x": x+(w-vw*scale)/2, "y": y+(h-vh*scale)/2},
+                             {"op": "scale", "x": scale, "y": scale},
+                             {"op": "translate", "x": -vx, "y": -vy}])
+            draw(logo, {}, {x.get("id"): x for x in logo.iter() if x.get("id")}, ink, opacity)
+        elif kind in ("defs", "title", "desc", "mask"):
+            return
+        elif kind == "use":
+            href = node.attrib.get("{http://www.w3.org/1999/xlink}href") or node.attrib.get("href") or node.attrib.get("xlink:href", "")
+            if href.startswith("#") and href[1:] in definitions:
+                draw(definitions[href[1:]], style, definitions, ink, opacity)
         elif kind in ("svg", "g"):
             for child in node:
                 draw(child, style, definitions, ink, opacity)
-        elif kind in ("path", "rect", "polygon", "polyline"):
+        elif kind in ("path", "rect", "polygon", "polyline", "circle", "ellipse", "line"):
             fill = style.get("fill", "black")
+            stroke = style.get("stroke")
             if fill != "none":
                 paint = {"color": ink or fill, "alpha": opacity*float(style.get("fill-opacity", 1))}
                 if fill.startswith("url("):
@@ -93,6 +128,11 @@ def compile_icon(root):
                              "stops": [dict(s.attrib, **{"stop-color": ink or s.get("stop-color", "black")}) for s in gradient],
                              "alpha": paint["alpha"]}
                 commands.append({"op": "path", "path": shapes(node), "evenOdd": style.get("fill-rule") == "evenodd", "paint": paint})
+            if stroke and stroke not in ("none", "transparent"):
+                paint = {"color": ink or stroke, "alpha": opacity*float(style.get("stroke-opacity", 1)),
+                         "stroke": True, "strokeWidth": float(style.get("stroke-width", 1)),
+                         "strokeCap": style.get("stroke-linecap", "butt"), "strokeJoin": style.get("stroke-linejoin", "miter")}
+                commands.append({"op": "path", "path": shapes(node), "evenOdd": False, "paint": paint})
         else:
             raise ValueError(f"Unsupported SVG element: {kind}")
         commands.append({"op": "restore"})

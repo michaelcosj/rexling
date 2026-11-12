@@ -42,7 +42,11 @@ import kotlinx.coroutines.launch
     onTab: (String)->Unit,onPane: (String)->Unit,onNewTab: ()->Unit,onNewPane: (String,PaneSplit)->Unit,
     onCloseTab: (WindowItem)->Unit,onClosePane: (BlockItem)->Unit,onClose: ()->Unit,initialPage: Int=0,
     onMoveTab: (String,String?)->Boolean={_,_->false},onMovePane: (String,String,String?)->Boolean={_,_,_->false},reorderKey: String="",
+    onRenameTab: (String,String)->Boolean={_,_->false},onRenamePane: (String,String,String)->Boolean={_,_,_->false},
+    onFloatPane: (String,String)->Boolean={_,_->false},onDockPane: (String,String,String,PaneSplit)->Boolean={_,_,_,_->false},error: String="",hazeState: dev.chrisbanes.haze.HazeState?=null,
 ) {
+    var rename by remember(reorderKey) {mutableStateOf<TerminalRenameTarget?>(null)}
+    var dock by remember(reorderKey) {mutableStateOf<Pair<String,String>?>(null)}
     val pager=rememberPagerState(initialPage=initialPage.coerceIn(0,1),pageCount={2})
     val scope=rememberCoroutineScope()
     var targetWindow by remember {mutableStateOf(selectedWindow)}
@@ -61,10 +65,7 @@ import kotlinx.coroutines.launch
         val program=programs[block?.id] ?: ProgramIdentity.Loading
         return program.tabTitle(tab.label,block?.label.orEmpty(),windows.indexOf(tab)+1,titles[block?.id].orEmpty())
     }
-    RexSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=MaterialTheme.colorScheme.surface,
-        dragHandle={Box(Modifier.fillMaxWidth().height(16.dp),contentAlignment=Alignment.Center) {
-            Box(Modifier.width(28.dp).height(3.dp).background(MaterialTheme.colorScheme.outlineVariant,RoundedCornerShape(3.dp)))
-        }}) {
+    RexSheet(onDismissRequest=onClose,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),frost=hazeState) {
         Column(Modifier.fillMaxWidth().height(panelHeight).padding(bottom=4.dp)) {
             Row(Modifier.fillMaxWidth().padding(start=16.dp,end=4.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.weight(1f).height(48.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.45f),RoundedCornerShape(12.dp)).padding(4.dp).selectableGroup()) {
@@ -81,6 +82,7 @@ import kotlinx.coroutines.launch
                 }
                 IconButton(onClick=onClose,modifier=Modifier.semantics {contentDescription="Close tab and pane switcher"}) {ChromeSymbol(ChromeIcon.CLOSE,Modifier.size(18.dp))}
             }
+            if(error.isNotBlank()) Text(error,Modifier.padding(horizontal=16.dp,vertical=4.dp),style=SettingsType.detail,color=MaterialTheme.colorScheme.error,maxLines=2,overflow=TextOverflow.Ellipsis)
             HorizontalPager(pager,Modifier.fillMaxWidth().weight(1f).semantics {contentDescription="Tab and pane pages"},verticalAlignment=Alignment.Top) {page->
                 val ids=if(page==0) windows.map {it.id} else panes.map {it.id}
                 val list=rememberLazyListState()
@@ -144,7 +146,10 @@ import kotlinx.coroutines.launch
                                 val subtitle=listOfNotNull(if(tab.id==selectedWindow) "Viewing" else null,count,directory.takeIf {it.isNotBlank()}).joinToString(" · ")
                                 SwitcherItem(title,subtitle,icons,focus,tab.id==targetWindow,
                                     "Tab $title",enabled && tab.blocks.isNotEmpty(),{targetWindow=tab.id},enabled,"Close tab $title",{onCloseTab(tab)},
-                                    Modifier.animateItem(fadeInSpec=null,fadeOutSpec=null,placementSpec=if(drag.id==tab.id) null else androidx.compose.animation.core.spring()).then(rowModifier(tab.id)),rowActions(tab.id))
+                                    Modifier.animateItem(fadeInSpec=null,fadeOutSpec=null,placementSpec=if(drag.id==tab.id) null else androidx.compose.animation.core.spring()).then(rowModifier(tab.id)),rowActions(tab.id),
+                                    actionsDescription="Actions for tab $title",actions={dismiss->
+                                        TerminalMenuItem("Rename tab",ChromeIcon.EDIT,enabled=enabled,onClick={dismiss();rename=TerminalRenameTarget(tab.id,tab.id,true,tab.label)})
+                                    })
                             }
                         } else {
                             if(panes.isEmpty()) item {SwitcherEmpty("No panes yet","Choose a tab or create a new one.")}
@@ -159,7 +164,18 @@ import kotlinx.coroutines.launch
                                 val subtitle=listOfNotNull(if(block.id==selectedBlock) "Viewing" else null,if(current?.layout?.any {it.id==block.id && it.floating}==true) "Floating" else null,directories[block.id].orEmpty().ifBlank {program.label}).joinToString(" · ")
                                 SwitcherItem(title,subtitle,listOf(program),0,block.id==targetPane,
                                     "Pane $title",enabled,{targetPane=block.id},enabled,"Close pane $title",{onClosePane(block)},
-                                    Modifier.animateItem(fadeInSpec=null,fadeOutSpec=null,placementSpec=if(drag.id==block.id) null else androidx.compose.animation.core.spring()).then(rowModifier(block.id)),rowActions(block.id))
+                                    Modifier.animateItem(fadeInSpec=null,fadeOutSpec=null,placementSpec=if(drag.id==block.id) null else androidx.compose.animation.core.spring()).then(rowModifier(block.id)),rowActions(block.id),
+                                    actionsDescription="Actions for pane $title",actions={dismiss->
+                                        TerminalMenuItem("Rename pane",ChromeIcon.EDIT,enabled=enabled,onClick={dismiss();rename=TerminalRenameTarget(targetWindow,block.id,false,block.label)})
+                                        val placement=current?.layout?.firstOrNull {it.id==block.id}
+                                        val tiled=current?.tiledPanes().orEmpty()
+                                        if(placement?.floating==true) TerminalMenuItem("Dock pane",ChromeIcon.SPLIT,enabled=enabled && tiled.isNotEmpty(),onClick={dismiss();dock=targetWindow to block.id})
+                                        else if(placement!=null) DropdownMenuItem(text={Column {
+                                            Text("Float pane",style=SettingsType.row)
+                                            if(tiled.size<2) Text("Keep one docked pane in this tab",style=SettingsType.detail)
+                                        }},leadingIcon={ChromeSymbol(ChromeIcon.FLOAT)},enabled=enabled && tiled.size>1,
+                                            onClick={dismiss();onFloatPane(targetWindow,block.id)})
+                                    })
                             }
                         }
                     }
@@ -198,6 +214,18 @@ import kotlinx.coroutines.launch
             }
         }
     }
+    rename?.let {target->
+        val available=windows.firstOrNull {it.id==target.window}?.let {target.tab || it.blocks.any {b->b.id==target.id}}==true
+        TerminalRenameDialog(target,enabled && available,onSave={label->
+            if(target.tab) onRenameTab(target.id,label) else onRenamePane(target.window,target.id,label)
+        },onClose={rename=null})
+    }
+    dock?.let {(window,id)->
+        val tab=windows.firstOrNull {it.id==window}
+        val anchors=tab?.tiledPanes().orEmpty().filterNot {it.id==id}
+        DockPaneDialog(anchors,programs,titles,enabled && tab?.floatingPanes()?.any {it.id==id}==true,
+            onDock={anchor,split->onDockPane(window,id,anchor,split)},onClose={dock=null})
+    }
 }
 
 @Composable private fun SplitDiagram(split: PaneSplit,modifier: Modifier,color: Color) {
@@ -220,7 +248,9 @@ import kotlinx.coroutines.launch
 }
 
 @Composable private fun SwitcherItem(title: String,subtitle: String,programs: List<ProgramIdentity>,focus: Int,active: Boolean,
-    description: String,enabled: Boolean,onSelect: ()->Unit,canClose: Boolean,closeDescription: String,onClose: ()->Unit,modifier: Modifier=Modifier,reorderActions: List<CustomAccessibilityAction> = emptyList()) {
+    description: String,enabled: Boolean,onSelect: ()->Unit,canClose: Boolean,closeDescription: String,onClose: ()->Unit,modifier: Modifier=Modifier,reorderActions: List<CustomAccessibilityAction> = emptyList(),actionsDescription: String="Terminal actions",
+    actions: @Composable ((()->Unit)->Unit)={}) {
+    var menu by remember {mutableStateOf(false)}
     val primary=MaterialTheme.colorScheme.primary
     Surface(modifier=modifier,shape=RoundedCornerShape(12.dp),color=MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.45f)) {
         Row(Modifier.fillMaxWidth().heightIn(min=56.dp).selectable(active,enabled=enabled,role=Role.RadioButton,onClick=onSelect)
@@ -232,8 +262,13 @@ import kotlinx.coroutines.launch
                 Text(title,style=SettingsType.row,color=if(active) primary else MaterialTheme.colorScheme.onSurface,maxLines=1,overflow=TextOverflow.Ellipsis)
                 Text(subtitle,style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
             }
-            IconButton(onClick=onClose,enabled=canClose,modifier=Modifier.semantics {contentDescription=closeDescription}) {
-                ChromeSymbol(ChromeIcon.CLOSE,Modifier.size(17.dp),if(canClose) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.38f))
+            Box {
+                ChromeButton(ChromeIcon.MORE,actionsDescription,enabled=enabled || canClose) {menu=true}
+                DropdownMenu(menu,{menu=false},containerColor=MaterialTheme.colorScheme.surface,tonalElevation=0.dp) {
+                    actions {menu=false}
+                    TerminalMenuItem(if(closeDescription.startsWith("Close tab")) "Close tab" else "Close pane",ChromeIcon.CLOSE,enabled=canClose,
+                        onClick={menu=false;onClose()})
+                }
             }
         }
     }

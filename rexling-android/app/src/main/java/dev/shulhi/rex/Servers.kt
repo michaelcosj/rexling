@@ -6,15 +6,21 @@ import java.net.URI
 import java.util.Locale
 import java.util.UUID
 
-data class ServerProfile(val id: String,val label: String,val endpoint: String) {
+enum class ServerIcon(val key: String,val label: String) {
+    GLOBE("globe","Globe"),SERVER("server","Server"),CLOUD("cloud","Cloud"),MACBOOK("macbook","MacBook"),
+    MAC_MINI("mac-mini","Mac mini"),MAC_STUDIO("mac-studio","Mac Studio"),DESKTOP("desktop","Desktop");
+    companion object {fun decode(value: String?)=entries.firstOrNull {it.key==value} ?: GLOBE}
+}
+
+data class ServerProfile(val id: String,val label: String,val endpoint: String,val icon: ServerIcon=ServerIcon.GLOBE) {
     companion object {
         val Empty=ServerProfile("__empty__","No server","")
-        fun create(label: String,endpoint: String,id: String=UUID.randomUUID().toString()): ServerProfile {
+        fun create(label: String,endpoint: String,id: String=UUID.randomUUID().toString(),icon: ServerIcon=ServerIcon.GLOBE): ServerProfile {
             val normalized=normalizeEndpoint(endpoint)
             val name=label.trim().ifEmpty {URI(normalized).host.substringBefore('.')}
             require(name.length<=64) {"Use a server name of at most 64 characters"}
             require(name.none {it.isISOControl()}) {"Use a single-line server name"}
-            return ServerProfile(id,name,normalized)
+            return ServerProfile(id,name,normalized,icon)
         }
         fun normalizeEndpoint(value: String): String {
             val uri=runCatching {URI(value.trim())}.getOrElse {throw IllegalArgumentException("Enter a complete server URL")}
@@ -37,11 +43,11 @@ object SavedServers {
             val array=JSONArray(text)
             (0 until array.length()).mapNotNull { index -> runCatching {
                 val item=array.getJSONObject(index)
-                ServerProfile.create(item.optString("label"),item.getString("endpoint"),item.getString("id"))
+                ServerProfile.create(item.optString("label"),item.getString("endpoint"),item.getString("id"),ServerIcon.decode(item.optString("icon")))
             }.getOrNull() }.distinctBy {it.id}.distinctBy {it.endpoint}
         }.getOrElse {legacy()}
     }
-    fun encode(servers: List<ServerProfile>): String = JSONArray(servers.map {JSONObject().put("id",it.id).put("label",it.label).put("endpoint",it.endpoint)}).toString()
+    fun encode(servers: List<ServerProfile>): String = JSONArray(servers.map {JSONObject().put("id",it.id).put("label",it.label).put("endpoint",it.endpoint).put("icon",it.icon.key)}).toString()
 }
 
 data class ServerStatus(val phase: String="disconnected",val error: String="") {

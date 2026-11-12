@@ -19,6 +19,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import dev.chrisbanes.haze.hazeSource
 
 @RunWith(AndroidJUnit4::class)
 class ImageUploadOverlayTest {
@@ -31,8 +32,15 @@ class ImageUploadOverlayTest {
         val visible=mutableStateOf(true)
         ui.mainClock.autoAdvance=false
         ui.setContent {RexTheme(dark.value,ThemeCatalog.defaults[if(dark.value) 0 else 1]) {
+            val haze=remember {dev.chrisbanes.haze.HazeState()}
             Box(Modifier.size(360.dp,420.dp).background(MaterialTheme.colorScheme.background).testTag("upload-host")) {
-                if(visible.value) ImageUploadOverlay(state.value,{retried++},{canceled++},Modifier.align(Alignment.BottomEnd).padding(16.dp).testTag("upload-pill"),retryable.value)
+                val backdrop=MaterialTheme.colorScheme.background
+                val text=MaterialTheme.colorScheme.onBackground
+                androidx.compose.foundation.Canvas(Modifier.fillMaxSize().hazeSource(haze)) {
+                    drawRect(backdrop)
+                    repeat(30) {row->drawRect(text.copy(alpha=.5f),androidx.compose.ui.geometry.Offset(4.dp.toPx(),row*14.dp.toPx()),androidx.compose.ui.geometry.Size(size.width*.8f,1.dp.toPx()))}
+                }
+                if(visible.value) ImageUploadOverlay(state.value,{retried++},{canceled++},Modifier.align(Alignment.BottomEnd).padding(16.dp).testTag("upload-pill"),retryable.value,hazeState=haze)
             }
         }}
         fun settle() {ui.mainClock.advanceTimeBy(1000);ui.waitForIdle()}

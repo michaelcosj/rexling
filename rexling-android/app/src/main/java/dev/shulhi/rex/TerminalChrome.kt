@@ -73,7 +73,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-internal enum class ChromeIcon { SPLIT, SEARCH, CHEVRON, SESSIONS, COPY, MORE, ADD, KEYBOARD, HIDE_KEYBOARD, LEFT, RIGHT, UP, DOWN, TAB, CLOSE, ESCAPE, CONTROL, ALT, SHIFT, POINTER, EYE, BACKSPACE, ARROWS, ENTER, SETTINGS, PASTE, IMAGE, SERVER, REFRESH, SUN, MOON, EDIT, UNPLUG, DELETE }
+internal enum class ChromeIcon { SPLIT, SEARCH, CHEVRON, SESSIONS, COPY, MORE, ADD, KEYBOARD, HIDE_KEYBOARD, LEFT, RIGHT, UP, DOWN, TAB, CLOSE, ESCAPE, CONTROL, ALT, SHIFT, POINTER, EYE, BACKSPACE, ARROWS, ENTER, SETTINGS, PASTE, IMAGE, SERVER, REFRESH, SUN, MOON, EDIT, UNPLUG, DELETE, FLOAT }
 
 @Composable internal fun ChromeSymbol(icon: ChromeIcon, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onSurface) {
     Canvas(modifier.size(19.dp)) {
@@ -89,6 +89,7 @@ internal enum class ChromeIcon { SPLIT, SEARCH, CHEVRON, SESSIONS, COPY, MORE, A
             line(x+dx*6,y+dy*6,x+dx*2+dy*4,y+dy*2-dx*4)
         }
         when(icon) {
+            ChromeIcon.FLOAT -> {box(3f,7f,14f,14f);box(10f,3f,11f,10f)}
             ChromeIcon.SPLIT -> { box(3f,4f,18f,16f);line(12f,4f,12f,20f) }
             ChromeIcon.SEARCH -> { drawCircle(color,6f*u,Offset(10f*u,10f*u),style=Stroke(width));line(15f,15f,21f,21f) }
             ChromeIcon.CHEVRON -> {line(7f,10f,12f,15f);line(12f,15f,17f,10f)}
@@ -192,7 +193,7 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
 @Composable internal fun SessionHeader(sessions: List<SessionItem>, selectedId: String,
     connected: Boolean, enabled: Boolean,
     programs: List<ProgramIdentity>, paneIndex: Int, directory: String,
-    onSessions: ()->Unit, onSelect: (String)->Unit, onLast: ()->Unit, title: String="", working: Boolean=false, expanded: Boolean=false, menu: @Composable ()->Unit) {
+    onSessions: ()->Unit, onSelect: (String)->Unit, onLast: ()->Unit, title: String="", working: Boolean=false, expanded: Boolean=false, serverIcons: Map<String,ServerIcon> = emptyMap(), menu: @Composable ()->Unit) {
     val program=programs.getOrNull(paneIndex) ?: ProgramIdentity.Terminal
     val titleHeight=with(LocalDensity.current) {16.sp.toDp()}
     val directoryHeight=with(LocalDensity.current) {12.sp.toDp()}
@@ -299,11 +300,12 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
                             .semantics { contentDescription=if(active || item==null) "Switch session" else "Session ${item.label}" },
                             verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(if(expanded) 6.dp else 4.dp)) {
                             Box(Modifier.size(if(expanded) 7.dp else 5.dp).background(if(connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,RoundedCornerShape(4.dp)))
-                            Text(item?.label ?: "Connect",fontFamily=MonoUi,fontWeight=if(expanded) FontWeight.Bold else FontWeight.Normal,
+                            serverIcons[item?.id]?.let {ServerGlyph(it,Modifier.size(if(expanded) 13.dp else 11.dp))}
+                            Text(item?.label ?: if(connected) "Sessions" else "Connect",fontFamily=MonoUi,fontWeight=if(expanded) FontWeight.Bold else FontWeight.Normal,
                                 fontSize=if(expanded) 12.sp else 9.sp,lineHeight=if(expanded) 16.sp else 12.sp,
                                 style=androidx.compose.ui.text.TextStyle(platformStyle=androidx.compose.ui.text.PlatformTextStyle(includeFontPadding=false)),letterSpacing=0.sp,maxLines=1,overflow=TextOverflow.Ellipsis,
                                 color=if(expanded) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier=Modifier.widthIn(max=(pageWidth-if(expanded) 50.dp else 24.dp).coerceAtLeast(10.dp)))
+                                modifier=Modifier.widthIn(max=(pageWidth-(if(expanded) 50.dp else 24.dp)-(if(serverIcons[item?.id]!=null) 15.dp else 0.dp)).coerceAtLeast(10.dp)))
                             ChromeSymbol(ChromeIcon.CHEVRON,Modifier.size(if(expanded) 13.dp else 11.dp),MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -361,7 +363,7 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
     LaunchedEffect(reorderKey,contentReady) {if(contentReady) revealed=true}
     if(!contentReady && !revealed) {
         // Reserve the dock's normal bounds so first-load metadata cannot resize the terminal.
-        Row(Modifier.fillMaxWidth().height(49.dp).padding(start=11.dp,end=6.dp),verticalAlignment=Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(45.dp).padding(start=11.dp,end=6.dp),verticalAlignment=Alignment.CenterVertically) {
             Spacer(Modifier.weight(1f).fillMaxHeight())
             actions()
         }
@@ -411,7 +413,7 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
             if(velocity!=0f) {list.scrollBy(velocity*speed*dt);drag.cross(velocity,list)}
         }
     }
-    Row(Modifier.fillMaxWidth().height(49.dp).padding(start=11.dp,end=6.dp),verticalAlignment=Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(45.dp).padding(start=11.dp,end=6.dp),verticalAlignment=Alignment.CenterVertically) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
             val density=LocalDensity.current.density
             val widths=remember(maxWidth,contentWidths,index,density) {tabWidths(maxWidth.value,contentWidths,index,density)}
@@ -463,7 +465,7 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
                     Box(Modifier.animateItem(fadeInSpec=null,fadeOutSpec=null,placementSpec=if(drag.id==w.id) null else androidx.compose.animation.core.spring())
                         .zIndex(if(drag.id==w.id) 1f else 0f)
                         .graphicsLayer {translationX=drag.translation(w.id,list)*sign}) {
-                    Column(Modifier.height(49.dp).width(width)
+                    Column(Modifier.height(45.dp).width(width)
                         .drawWithContent {
                             drawContent()
                             if(active) {
@@ -535,7 +537,7 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
     LaunchedEffect(expanded) {if(!expanded) keyScroll.scrollTo(keyScroll.maxValue)}
     Column(Modifier.fillMaxWidth().padding(horizontal=8.dp)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outline.copy(alpha=.4f)))
-        Row(Modifier.fillMaxWidth().height(53.dp).padding(vertical=8.dp),horizontalArrangement=Arrangement.spacedBy(4.dp),verticalAlignment=Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(45.dp).padding(vertical=4.dp),horizontalArrangement=Arrangement.spacedBy(4.dp),verticalAlignment=Alignment.CenterVertically) {
             BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
                 val visibleWidth=maxWidth
                 val keyWidth=(visibleWidth-24.dp)/7

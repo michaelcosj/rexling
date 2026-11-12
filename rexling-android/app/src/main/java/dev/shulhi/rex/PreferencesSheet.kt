@@ -16,7 +16,8 @@ import androidx.compose.ui.unit.dp
     shortcutGesture: ControlShortcutGesture=ControlShortcutGesture.HOLD,onShortcutGesture: (ControlShortcutGesture)->Unit={},onShortcuts: ()->Unit={},
     arrowJoystickEnabled: Boolean=true,onArrowJoystick: (Boolean)->Unit={},codexTitleAttention: Boolean=false,onCodexTitleAttention: (Boolean)->Unit={},
     terminalPadding: TerminalPadding=TerminalPadding.NORMAL,onTerminalPadding: (TerminalPadding)->Unit={},extendPadding: Boolean=true,onExtendPadding: (Boolean)->Unit={},
-    predictiveEcho: PredictiveEcho=PredictiveEcho.SLOW,onPredictiveEcho: (PredictiveEcho)->Unit={}) {
+    predictiveEcho: PredictiveEcho=PredictiveEcho.SLOW,onPredictiveEcho: (PredictiveEcho)->Unit={},
+    minimizeFloatingPanes: Boolean=false,onMinimizeFloatingPanes: (Boolean)->Unit={}) {
     RexSheet(onDismissRequest=onClose) {
         Column(Modifier.fillMaxWidth().heightIn(max=680.dp).verticalScroll(rememberScrollState()).padding(horizontal=20.dp).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             SettingsHeader("Preferences","Close preferences",onClose)
@@ -29,6 +30,10 @@ import androidx.compose.ui.unit.dp
                 SettingsDivider()
                 SettingsToggleRow("Extend colors into padding",extendPadding,onExtendPadding,
                     subtitle=if(extendPadding) "Edge cell colors fill the padding, like Neovim's background" else "Padding keeps the theme background")
+            }
+            SettingsSection("Panes") {
+                SettingsToggleRow("Minimize floating panes",minimizeFloatingPanes,onMinimizeFloatingPanes,
+                    subtitle="Open floating panes from a corner dock. Swipe between tiled panes only.")
             }
             SettingsSection("Keyboard") {
                 SettingsToggleRow("Use joystick for arrows",arrowJoystickEnabled,onArrowJoystick,

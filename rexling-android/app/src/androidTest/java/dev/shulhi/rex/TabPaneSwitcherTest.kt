@@ -59,22 +59,24 @@ class TabPaneSwitcherTest {
     @Test fun addAndCloseActionsBelongToTheirOwnSection() {
         show()
         ui.onNodeWithText("New tab").performClick()
-        ui.onNodeWithContentDescription("Close tab Project").performClick()
+        ui.onNodeWithContentDescription("Actions for tab Project").performClick()
+        ui.onNodeWithText("Close tab").performClick()
         ui.onNodeWithText("Panes").performClick()
         chooseSplit("Split right")
         chooseSplit("Split below")
-        ui.onNodeWithContentDescription("Close pane fish").performClick()
+        ui.onNodeWithContentDescription("Actions for pane fish").performClick()
+        ui.onNodeWithText("Close pane").performClick()
         ui.runOnIdle {assertEquals(listOf("new-tab","close-tab:w1","new-pane:b:horizontal","new-pane:b:vertical","close-pane:a"),calls)}
     }
     @Test fun busyStateDisablesTerminalActionsButAllowsBrowsingSections() {
         show(enabled=false)
         ui.onNodeWithContentDescription("Tab Project").assertIsNotEnabled()
         ui.onNodeWithText("New tab").assertIsNotEnabled()
-        ui.onNodeWithContentDescription("Close tab Project").assertIsNotEnabled()
+        ui.onNodeWithContentDescription("Actions for tab Project").assertIsNotEnabled()
         ui.onNodeWithText("Panes").performClick()
         ui.onNodeWithContentDescription("Pane fish").assertIsNotEnabled()
         ui.onNodeWithText("New pane").assertIsNotEnabled()
-        ui.onNodeWithContentDescription("Close pane fish").assertIsNotEnabled()
+        ui.onNodeWithContentDescription("Actions for pane fish").assertIsNotEnabled()
         ui.runOnIdle {assertTrue(calls.isEmpty())}
     }
     @Test fun emptySessionOffersANewTabButCannotAddAnUnanchoredPane() {

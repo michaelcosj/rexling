@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.chrisbanes.haze.HazeState
 
 /*
  * Rex-styled menus: JetBrains Mono throughout, flat surfaces separated by hairlines,
@@ -49,13 +50,34 @@ private val RexShapes=Shapes(extraSmall=RoundedCornerShape(4.dp),small=RoundedCo
     }
 }
 
-/** A flat bottom sheet with the same top corners as the tab dock. */
+internal val RexSheetShape=RoundedCornerShape(topStart=24.dp,topEnd=24.dp)
+
+/**
+ * A flat bottom sheet with the same top corners as the tab dock. With [frost], the sheet
+ * blurs the live terminal behind it instead of drawing an opaque surface; pass the
+ * workspace [HazeState] so the backdrop is the terminal rather than the dialog window.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable internal fun RexSheet(onDismissRequest: ()->Unit,sheetState: SheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),
-    containerColor: Color=MaterialTheme.colorScheme.surface,dragHandle: (@Composable ()->Unit)?={RexDragHandle()},content: @Composable ColumnScope.()->Unit) {
-    ModalBottomSheet(onDismissRequest=onDismissRequest,sheetState=sheetState,shape=RoundedCornerShape(topStart=24.dp,topEnd=24.dp),
-        containerColor=containerColor,tonalElevation=0.dp,scrimColor=Color.Black.copy(alpha=.55f),dragHandle=dragHandle) {
-        RexMenuTheme {Column(Modifier.fillMaxWidth(),content=content)}
+    containerColor: Color=MaterialTheme.colorScheme.surface,dragHandle: (@Composable ()->Unit)?={RexDragHandle()},frost: HazeState?=null,
+    content: @Composable ColumnScope.()->Unit) {
+    if(frost==null) {
+        ModalBottomSheet(onDismissRequest=onDismissRequest,sheetState=sheetState,shape=RexSheetShape,
+            containerColor=containerColor,tonalElevation=0.dp,scrimColor=Color.Black.copy(alpha=.55f),dragHandle=dragHandle) {
+            RexMenuTheme {Column(Modifier.fillMaxWidth(),content=content)}
+        }
+        return
+    }
+    // The frosted surface lets the terminal show through, so the scrim stays lighter.
+    ModalBottomSheet(onDismissRequest=onDismissRequest,sheetState=sheetState,shape=RexSheetShape,containerColor=Color.Transparent,
+        contentColor=MaterialTheme.colorScheme.onSurface,tonalElevation=0.dp,scrimColor=Color.Black.copy(alpha=.32f),dragHandle=null,
+        contentWindowInsets={WindowInsets(0,0,0,0)}) {
+        RexMenuTheme {
+            Column(Modifier.drawerFrost(frost,RexSheetShape).fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
+                dragHandle?.invoke()
+                content()
+            }
+        }
     }
 }
 

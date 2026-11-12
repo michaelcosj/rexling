@@ -1,0 +1,28 @@
+{
+  "build": 103,
+  "date": "2026-11-10",
+  "icon_dp": [
+    22,
+    18
+  ],
+  "visible_icon_text_gap_dp": 9,
+  "outer_padding_dp": {
+    "horizontal": 6,
+    "vertical": 4
+  },
+  "checks": [
+    "Release build and lint passed",
+    "APK signature, JNI exports, profiles and 16KB alignment verified",
+    "Whitespace check passed"
+  ],
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 103,
+    "sha256": "eaa5272da007bacf1a9571a3f6dbfa389c833d8fce8ba400733b906edfc2c864",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  },
+  "sha256": "eaa5272da007bacf1a9571a3f6dbfa389c833d8fce8ba400733b906edfc2c864"
+}

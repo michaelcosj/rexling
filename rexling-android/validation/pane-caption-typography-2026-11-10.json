@@ -1,0 +1,17 @@
+{
+  "build": 98,
+  "date": "2026-11-10",
+  "android_tests_passed": 14,
+  "release_lint_packaging_verified": true,
+  "change": "Switch caption first line uses tab title size (12sp), fixed icon slot and 2dp icon gap",
+  "fork_changes_applied": false,
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 98,
+    "sha256": "30d0c03c5593b6c03d7d74c690a053fc375ccc33b856523e9b4529f66034b674",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  }
+}

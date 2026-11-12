@@ -1,0 +1,32 @@
+{
+  "build": 104,
+  "date": "2026-11-10",
+  "source": "lemon-supply-chain/rexling@ed05beb791122a005695ecbd5fbd51d9c12f2dfe",
+  "catalog_tiles": 155,
+  "added_tiles": 144,
+  "excluded": "CUA: embedded raster logo; keep terminal fallback instead of an empty tile",
+  "changes": [
+    "Executable-only catalog matching and aliases, retaining custom title precedence",
+    "Specific programs precede generic Node/Python and shell wrappers",
+    "Distinct tiles for Bun, pnpm, shells and recognized catalog apps",
+    "SVG compiler and native renderer preserve strokes, caps and joins"
+  ],
+  "checks": {
+    "jvm_passed": 166,
+    "jvm_skipped": 1,
+    "android_render_checks_passed": 4,
+    "original_11_command_sets_unchanged": true,
+    "svg_sha256_verified": 155,
+    "release_lint_and_packaging_verified": true,
+    "atlas_visually_reviewed": true
+  },
+  "installation": {
+    "device": "RFCT21390SD",
+    "model": "SM-S906E",
+    "version_code": 104,
+    "sha256": "b7a483dbf66138f0c4e5ffc7b9048ffef4e89c25099a6d51a0706d31d954f09b",
+    "settings_preserved": true,
+    "app_launched": false,
+    "transport": "USB ADB"
+  }
+}
