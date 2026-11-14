@@ -8,6 +8,11 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -61,29 +66,61 @@ import kotlinx.coroutines.launch
 
 @Composable internal fun SshKeyEditor(endpoint: String) {
     val context=LocalContext.current;val scope=rememberCoroutineScope()
-    var source by remember {mutableStateOf<String?>(null)}
-    var passphrase by remember {mutableStateOf("")}
-    var error by remember {mutableStateOf<String?>(null)}
+    var source by remember(endpoint) {mutableStateOf<String?>(null)}
+    var pasted by remember(endpoint) {mutableStateOf(false)}
+    var passphrase by remember(endpoint) {mutableStateOf("")}
+    var error by remember(endpoint) {mutableStateOf<String?>(null)}
+    var busy by remember(endpoint) {mutableStateOf(false)}
     var imported by remember(endpoint) {mutableStateOf(NetworkSettings.hasKey(endpoint))}
+    fun dismiss() {if(!busy) {source=null;passphrase="";error=null;pasted=false}}
     val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->
         if(uri!=null) runCatching {context.contentResolver.openInputStream(uri)?.use {stream->
             val output=java.io.ByteArrayOutputStream();val buffer=ByteArray(4096)
             while(true) {val count=stream.read(buffer);if(count<0) break;require(output.size()+count<=131072) {"SSH key is too large"};output.write(buffer,0,count)}
-            source=String(output.toByteArray())
+            source=String(output.toByteArray());pasted=false;passphrase="";error=null
         }}.onFailure {error=it.message}
     }
-    Text(if(imported) "SSH key saved securely on this phone" else "Connect without a key for Tailscale SSH, or import a private key.",style=SettingsType.detail)
-    Row {TextButton(onClick={picker.launch(arrayOf("*/*"))}) {Text("Import SSH key")}
-        if(imported) TextButton(onClick={scope.launch {NetworkSettings.removeKey(endpoint);imported=false}}) {Text("Remove key")}}
-    error?.let {Text(it,color=MaterialTheme.colorScheme.error,style=SettingsType.detail)}
-    if(source!=null) AlertDialog(onDismissRequest={source=null;passphrase=""},title={Text("Import SSH key")},text={
-        Column {Text("The key stays encrypted on this phone. Enter its passphrase if required.",style=SettingsType.detail)
-            OutlinedTextField(passphrase,{passphrase=it},label={Text("Passphrase (optional)")},visualTransformation=PasswordVisualTransformation(),singleLine=true)
-            error?.let {Text(it,color=MaterialTheme.colorScheme.error)}}
-    },confirmButton={TextButton(onClick={scope.launch {
-        error=NetworkSettings.importKey(endpoint,source!!,passphrase)
-        if(error==null) {source=null;passphrase="";imported=true}
-    }}) {Text("Import")}},dismissButton={TextButton(onClick={source=null;passphrase=""}) {Text("Cancel")}})
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.5f)).padding(12.dp),verticalArrangement=Arrangement.spacedBy(2.dp)) {
+        Text("SSH key",style=SettingsType.row)
+        Text(if(imported) "Saved securely on this phone" else "Optional for Tailscale SSH.",style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(2.dp)) {
+            TextButton(contentPadding=PaddingValues(horizontal=6.dp,vertical=4.dp),onClick={picker.launch(arrayOf("*/*"))}) {Text("Import file",style=SettingsType.detail)}
+        TextButton(contentPadding=PaddingValues(horizontal=6.dp,vertical=4.dp),onClick={
+            pasted=true;source="";passphrase="";error=null
+            runCatching {
+                val clip=(context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip
+                val text=if(clip!=null && clip.itemCount>0) clip.getItemAt(0).text?.toString().orEmpty() else ""
+                require(text.toByteArray().size<=131072) {"SSH key is too large"}
+                source=text
+            }.onFailure {error=it.message}
+        }) {Text("Paste key",style=SettingsType.detail)}
+
+            Spacer(Modifier.weight(1f))
+            if(imported) TextButton(contentPadding=PaddingValues(horizontal=6.dp,vertical=4.dp),onClick={scope.launch {NetworkSettings.removeKey(endpoint);imported=false}}) {Text("Remove",style=SettingsType.detail,color=MaterialTheme.colorScheme.error)}
+        }
+        if(source==null) error?.let {Text(it,color=MaterialTheme.colorScheme.error,style=SettingsType.detail)}
+    }
+    if(source!=null) AlertDialog(onDismissRequest={dismiss()},title={Text(if(pasted) "Paste SSH key" else "Import SSH key",style=SettingsType.title)},text={
+        Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text("The key stays encrypted on this phone. Enter its passphrase if required.",style=SettingsType.detail)
+            if(pasted) OutlinedTextField(source.orEmpty(),{text->
+                if(text.toByteArray().size<=131072) {source=text;error=null} else error="SSH key is too large"
+            },Modifier.fillMaxWidth(),label={Text("Private key")},supportingText={Text("Include the BEGIN and END lines.",style=SettingsType.detail)},
+                minLines=3,maxLines=5,enabled=!busy,textStyle=SettingsType.detail,
+                visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,autoCorrectEnabled=false))
+            OutlinedTextField(passphrase,{passphrase=it;error=null},label={Text("Passphrase (optional)")},visualTransformation=PasswordVisualTransformation(),singleLine=true,textStyle=SettingsType.body,
+                enabled=!busy,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,autoCorrectEnabled=false))
+            error?.let {Text(it,color=MaterialTheme.colorScheme.error,style=SettingsType.detail)}
+        }
+    },confirmButton={TextButton(enabled=!busy && !source.isNullOrBlank(),onClick={
+        val key=source.orEmpty();val phrase=passphrase;busy=true
+        scope.launch {
+            error=runCatching {NetworkSettings.importKey(endpoint,key,phrase)}.getOrElse {"Could not import SSH key"}
+            busy=false
+            if(error==null) {source=null;passphrase="";imported=true;pasted=false}
+        }
+    }) {Text(if(busy) "Importing…" else "Import")}},dismissButton={TextButton(enabled=!busy,onClick={dismiss()}) {Text("Cancel")}})
+
 }
 
 @Composable internal fun NetworkPrompts() {

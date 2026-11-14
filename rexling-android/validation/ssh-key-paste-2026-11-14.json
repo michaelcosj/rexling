@@ -1,0 +1,16 @@
+{
+  "build": 123,
+  "phone_tests_passed": 6,
+  "phone_model": "SM-S906E",
+  "lint_release": "passed",
+  "jvm_tests": "passed",
+  "coverage": [
+    "explicit clipboard read and editable masked key field",
+    "successful generated RSA private key import",
+    "Android Keystore encrypted storage",
+    "cancel without saving",
+    "empty clipboard and manual paste",
+    "invalid key rejection",
+    "existing file-import/keyless settings"
+  ]
+}

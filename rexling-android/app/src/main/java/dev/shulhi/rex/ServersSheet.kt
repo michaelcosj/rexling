@@ -77,13 +77,15 @@ import androidx.compose.ui.unit.sp
     var endpoint by remember(server?.id) {mutableStateOf(server?.endpoint.orEmpty())}
     var icon by remember(server?.id) {mutableStateOf(server?.icon ?: ServerIcon.GLOBE)}
     var error by remember {mutableStateOf<String?>(null)}
-    AlertDialog(onDismissRequest=onClose,title={Text(if(server==null) "Add server" else "Edit server")},text={
+    AlertDialog(onDismissRequest=onClose,title={Text(if(server==null) "Add server" else "Edit server",style=SettingsType.title)},text={
         Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-            ServerIconPicker(icon) {icon=it}
-            OutlinedTextField(name,{name=it;error=null},Modifier.fillMaxWidth(),label={Text("Name")},singleLine=true)
-            OutlinedTextField(endpoint,{endpoint=it;error=null},Modifier.fillMaxWidth(),label={Text("Server URL")},singleLine=true,
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp),verticalAlignment=Alignment.CenterVertically) {
+                ServerIconPicker(icon,compact=true) {icon=it}
+                OutlinedTextField(name,{name=it;error=null},Modifier.weight(1f),label={Text("Name")},singleLine=true,textStyle=SettingsType.body)
+            }
+            OutlinedTextField(endpoint,{endpoint=it;error=null},Modifier.fillMaxWidth(),label={Text("Server URL")},singleLine=true,textStyle=SettingsType.body,
                 keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Uri),placeholder={Text("https://host.tailnet.ts.net",fontSize=11.sp)})
-            Text("HTTPS for an existing Rex server, or ssh://user@host for SSH.",fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if(endpoint.startsWith("ssh://")) "SSH to a host running Rex." else "Use an HTTPS address, or ssh://user@host.",style=SettingsType.detail,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(endpoint.startsWith("ssh://")) {
                 val normalized=runCatching {ServerProfile.normalizeEndpoint(endpoint)}.getOrNull()
                 if(normalized!=null) SshKeyEditor(normalized)
