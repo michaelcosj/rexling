@@ -75,6 +75,39 @@ class TerminalImeViewportTest {
             .put("legacy_row_recordings",baseline.second).put("fixed_row_recordings",fixed.second)
         File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null),"ime-rendering.json").writeText(result.toString(2))
     }
+    @Test fun historyAndHiddenCursorFramesDoNotMoveTheKeyboardViewport() {
+        val dimensions=mutableListOf<Pair<Int,Int>>();lateinit var view: TerminalView
+        var focus by mutableStateOf<TerminalKeyboardFocus?>(null)
+        ui.setContent {MaterialTheme {
+            Box(Modifier.width(320.dp).height(300.dp).clipToBounds()) {
+                AndroidView(factory={TerminalView(it).also {v->view=v;attach(v,dimensions);v.onKeyboardFocus={focus=it}}},
+                    modifier=Modifier.fillMaxSize().terminalImeViewport(WindowInsets(bottom=400),WindowInsets(0,0,0,0)) {focus},update={focus=it.keyboardFocus})
+            }
+        }}
+        ui.waitForIdle()
+        lateinit var live: TerminalScreen;var anchoredY=0;var size=0
+        ui.runOnIdle {
+            live=view.screen!!;size=dimensions.size
+            assertTrue("Fixture must start with a panned keyboard viewport",terminalImePan(view.keyboardFocus,view.height-400,400)>0)
+            val position=IntArray(2);view.getLocationInWindow(position);anchoredY=position[1]
+        }
+        repeat(8) {index->
+            ui.runOnIdle {
+                view.screen=when(index%4) {
+                    0->live.copy(cursorX=null,cursorY=null)
+                    1->live.copy(cursorY=1,scroll=TerminalScroll(live.rows+200L,50,live.rows.toLong()))
+                    2->live.copy(cursorX=null,cursorY=null,scroll=TerminalScroll(live.rows+200L,80,live.rows.toLong()))
+                    else->live
+                }
+            }
+            ui.waitForIdle()
+            ui.runOnIdle {
+                val position=IntArray(2);view.getLocationInWindow(position)
+                assertEquals("Cursor visibility/history updates must not jump the whole pane",anchoredY,position[1])
+                assertEquals(size,dimensions.size)
+            }
+        }
+    }
     @Test fun realKeyboardDoesNotResizeTheTerminalAndTopPromptStaysPut() {
         val dimensions=mutableListOf<Pair<Int,Int>>();lateinit var view: TerminalView
         var visibleHeight=0;var viewportTop=0f;var cursorBottom by mutableStateOf<TerminalKeyboardFocus?>(null)

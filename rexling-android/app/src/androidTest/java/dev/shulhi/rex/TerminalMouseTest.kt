@@ -16,6 +16,26 @@ class TerminalMouseTest {
     }
     private fun frame(flags: Int=1)=TerminalScreen(40,12,null,null,-1,0,emptyList(),TerminalScroll(12,0,12),inputFlags=flags)
     private fun view()=TerminalView(instrumentation.targetContext).apply {screen=frame();controlled=true;layout(0,0,1600,1000)}
+    @Test fun semanticInputTapFocusesShellInputButNotOutputOrHistory() {
+        instrumentation.runOnMainSync {
+            val metrics=TerminalFonts(instrumentation.targetContext).configure(Paint(),10f)
+            val view=view().apply {
+                screen=frame(48).copy(cursorX=2,cursorY=3,
+                    cells=listOf(TerminalCell(0,3,"$ ",-1,0,1 shl 30,1)),
+                    lines=List(12){if(it==3) listOf(TerminalCell(0,3,"$ ",-1,0,1 shl 30,1)) else emptyList()})
+            }
+            fun tap(row: Int,time: Long) {
+                event(view,MotionEvent.ACTION_DOWN,5f,metrics.cellHeight*(row+.5f),time)
+                event(view,MotionEvent.ACTION_UP,5f,metrics.cellHeight*(row+.5f),time+30)
+            }
+            tap(2,0);assertFalse(view.hasFocus())
+            tap(3,100);assertTrue(view.hasFocus())
+            view.clearFocus();view.screen=view.screen!!.copy(scroll=TerminalScroll(100,0,12))
+            tap(3,200);assertFalse(view.hasFocus())
+            view.screen=view.screen!!.copy(scroll=TerminalScroll(12,0,12),inputFlags=32)
+            tap(3,300);assertFalse(view.hasFocus())
+        }
+    }
     @Test fun tapSendsOneClickAtTheRenderedCellAfterReleaseWithoutActivation() {
         instrumentation.runOnMainSync {
             val calls=mutableListOf<Pair<Int,Int>>();var activated=0

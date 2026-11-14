@@ -47,6 +47,7 @@ unsafe extern "C" {
     fn rp_bytes_free(bytes: *mut u8, len: usize);
     fn rp_scroll(term: *mut c_void, lines: i32, bottom: i32);
     fn rp_input_flags(term: *mut c_void, flags: *mut u8) -> i32;
+    fn rp_render_hold_state(term: *mut c_void,held: *mut u8,generation: *mut u64) -> i32;
     fn rp_wheel(term: *mut c_void, down: i32, col: i32, row: i32, cw: u32, ch: u32, out: *mut u8, capacity: usize, len: *mut usize) -> i32;
     fn rp_click(term: *mut c_void, col: i32, row: i32, cw: u32, ch: u32, out: *mut u8, capacity: usize, len: *mut usize) -> i32;
     fn rp_frame(
@@ -156,6 +157,7 @@ pub struct Terminal {
     _owner_thread: PhantomData<Rc<()>>,
     images:crate::graphics::Images,
     graphics_clock:std::time::Instant,
+    render_hold:Option<(u64,u64)>,
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
@@ -175,7 +177,7 @@ impl Terminal {
         check(unsafe { rp_new(columns, rows, &mut handle) }, "create")?;
         Ok(Self {
             handle: NonNull::new(handle).context("null terminal")?,
-            _owner_thread: PhantomData,images:Default::default(),graphics_clock:std::time::Instant::now(),
+            _owner_thread: PhantomData,images:Default::default(),graphics_clock:std::time::Instant::now(),render_hold:None,
         })
     }
     pub fn decode(bytes: &[u8]) -> Result<(Self, usize)> {
@@ -189,7 +191,7 @@ impl Terminal {
         Ok((
             Self {
                 handle: NonNull::new(handle).context("null decoded terminal")?,
-                _owner_thread: PhantomData,images:Default::default(),graphics_clock:std::time::Instant::now(),
+                _owner_thread: PhantomData,images:Default::default(),graphics_clock:std::time::Instant::now(),render_hold:None,
             },
             offset,
         ))
@@ -284,6 +286,18 @@ impl Terminal {
     }
     pub fn scroll_to_bottom(&mut self) {
         unsafe { rp_scroll(self.handle.as_ptr(), 0, 1) };
+    }
+    /// Keep the previous complete screen during DEC synchronized output.
+    /// A missing reset must not freeze the display indefinitely.
+    pub fn render_ready(&mut self) -> Result<bool> {
+        self.render_ready_at(self.graphics_clock.elapsed().as_millis() as u64)
+    }
+    fn render_ready_at(&mut self,now:u64) -> Result<bool> {
+        let mut held=0;let mut generation=0;
+        check(unsafe {rp_render_hold_state(self.handle.as_ptr(),&mut held,&mut generation)},"render hold")?;
+        if held==0 {self.render_hold=None;return Ok(true);}
+        let start=match self.render_hold {Some((epoch,start)) if epoch==generation=>start,_=>{self.render_hold=Some((generation,now));now}};
+        Ok(now.saturating_sub(start)>=1000)
     }
     pub fn frame(&mut self) -> Result<Frame> {
         self.frame_at(self.graphics_clock.elapsed().as_millis() as u64)
@@ -487,6 +501,42 @@ impl Replica {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn input_rows(frame: &Frame) -> Vec<u16> {
+        let mut rows=frame.cells.iter().filter(|c|c.attributes & (1<<30)!=0).map(|c|c.y).collect::<Vec<_>>();
+        rows.sort();rows.dedup();rows
+    }
+    #[test] fn semantic_input_tracks_command_lifecycle_and_only_current_prompt() {
+        let mut t=Terminal::new(30,8).unwrap();
+        t.write(b"\x1b]133;A\x07$ ").unwrap();
+        assert_eq!(t.frame().unwrap().input_flags & 16,0);
+        t.write(b"\x1b]133;B\x07").unwrap();
+        assert_eq!(input_rows(&t.frame().unwrap()),vec![0]);
+        t.write(b"echo hi\x1b]133;C\x07").unwrap();
+        assert!(input_rows(&t.frame().unwrap()).is_empty());
+        t.write(b"\r\nhi\r\n\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07").unwrap();
+        assert_eq!(input_rows(&t.frame().unwrap()),vec![2]);
+        let snapshot=t.encode().unwrap();let (mut restored,_)=Terminal::decode(&snapshot).unwrap();
+        assert_eq!(input_rows(&restored.frame().unwrap()),vec![2]);
+        t.write(b"\x1b[?1049h").unwrap();assert!(input_rows(&t.frame().unwrap()).is_empty());
+        t.write(b"\x1b[?1049l").unwrap();assert_eq!(input_rows(&t.frame().unwrap()),vec![2]);
+    }
+    #[test] fn semantic_input_handles_line_limited_and_wrapped_input() {
+        let mut t=Terminal::new(10,8).unwrap();
+        t.write(b"\x1b]133;A\x07$ \x1b]133;B\x07abcdefghijklmnop").unwrap();
+        assert_eq!(input_rows(&t.frame().unwrap()),vec![0,1]);
+        t.write(b"\r\n\x1b]133;P;k=c\x07> \x1b]133;B\x07more").unwrap();
+        assert_eq!(input_rows(&t.frame().unwrap()),vec![0,1,2]);
+        t.write(b"\x1b]133;C\x07\r\n\x1b]133;D\x07\x1b]133;A\x07$ \x1b]133;I\x07x").unwrap();
+        assert_eq!(input_rows(&t.frame().unwrap()),vec![3]);
+        t.write(b"\r\noutput").unwrap();assert!(input_rows(&t.frame().unwrap()).is_empty());
+    }
+    #[test] fn semantic_input_is_not_exposed_over_history() {
+        let mut t=Terminal::new(20,4).unwrap();
+        t.write(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\n\x1b]133;A\x07$ \x1b]133;B\x07").unwrap();
+        assert!(!input_rows(&t.frame().unwrap()).is_empty());
+        t.scroll_viewport(-100);assert!(input_rows(&t.frame().unwrap()).is_empty());
+        t.scroll_to_bottom();assert!(!input_rows(&t.frame().unwrap()).is_empty());
+    }
     #[test]
     fn restored_scrollback_scrolls_locally_and_keeps_new_output_anchored() {
         let mut original = Terminal::new(30, 4).unwrap();
@@ -614,6 +664,28 @@ mod tests {
         assert_ne!(bg.attributes & 1024, 0);
         assert_eq!((bg.attributes >> 19) & 255, 2);
     }
+    #[test] fn synchronized_redraw_holds_partial_frames_and_has_a_bounded_timeout() {
+        let mut terminal=Terminal::new(40,5).unwrap();
+        terminal.write(b"complete screen").unwrap();
+        assert!(terminal.render_ready_at(0).unwrap());
+        terminal.write(b"\x1b[?2026h\x1b[2J\x1b[H").unwrap();
+        assert!(!terminal.render_ready_at(10).unwrap());
+        terminal.write(b"new screen").unwrap();
+        assert!(!terminal.render_ready_at(500).unwrap());
+        terminal.write(b"\x1b[?2026l").unwrap();
+        assert!(terminal.render_ready_at(510).unwrap());
+        assert!(terminal.frame().unwrap().text().contains("new screen"));
+        terminal.write(b"\x1b[?2026h").unwrap();
+        assert!(!terminal.render_ready_at(600).unwrap());
+        assert!(terminal.render_ready_at(1600).unwrap());
+        assert!(terminal.render_ready_at(1700).unwrap());
+        // A new hold must reset the timer even if its end/start share one chunk.
+        terminal.write(b"\x1b[?2026l\x1b[?2026h").unwrap();
+        assert!(!terminal.render_ready_at(1800).unwrap());
+        terminal.resize(40,6,8,16).unwrap();
+        assert!(terminal.render_ready_at(1810).unwrap());
+    }
+
     #[test] fn clicks_obey_mouse_modes_and_pair_press_with_release() {
         let mut terminal=Terminal::new(80,24).unwrap();
         assert!(terminal.click(4,5,10,20).unwrap().is_empty());

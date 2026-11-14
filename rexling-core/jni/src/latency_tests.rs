@@ -19,6 +19,7 @@ struct Peer {
     writes: Arc<Mutex<Vec<String>>>,
     acknowledged: Arc<AtomicUsize>,
     methods: Arc<Mutex<Vec<String>>>,
+    output: mpsc::Sender<Vec<u8>>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Drop for Peer {
@@ -46,6 +47,7 @@ impl Peer {
             acknowledged.clone(),
             methods.clone(),
         );
+        let output=output_tx.clone();
         let task = tokio::spawn(async move {
             let mut peers = tokio::task::JoinSet::new();
             loop {
@@ -120,6 +122,7 @@ impl Peer {
             writes,
             acknowledged,
             methods,
+            output,
             task,
         }
     }
@@ -178,6 +181,27 @@ async fn input(tx: &mpsc::Sender<Value>, text: &str) {
 }
 async fn shutdown(tx: &mpsc::Sender<Value>) {
     tx.send(json!({"type":"shutdown"})).await.unwrap();
+}
+
+#[tokio::test]
+async fn synchronized_redraw_never_publishes_the_intermediate_blank_screen() {
+    let peer=Peer::new(Duration::ZERO,false,false).await;
+    let (mut actor,shared)=peer.actor(1,false).await;
+    actor.dirty=true;
+    let (tx,rx)=mpsc::channel(128);
+    tokio::join!(actor.run(rx),async {
+        until(||shared.lock().unwrap().frame.is_some()).await;
+        let complete=shared.lock().unwrap().frame.clone().unwrap();
+        peer.output.send(b"\x1b[?2026h\x1b[2J\x1b[H".to_vec()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(Arc::ptr_eq(shared.lock().unwrap().frame.as_ref().unwrap(),&complete),"Clearing inside a synchronized redraw must retain the old complete frame");
+        peer.output.send(b"partial redraw".to_vec()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(Arc::ptr_eq(shared.lock().unwrap().frame.as_ref().unwrap(),&complete),"A partial redraw must not reach the Android renderer");
+        peer.output.send(b" completed\x1b[?2026l".to_vec()).await.unwrap();
+        until(||shared.lock().unwrap().frame.as_ref().is_some_and(|frame|frame.text().contains("partial redraw completed"))).await;
+        shutdown(&tx).await;
+    });
 }
 
 #[tokio::test]

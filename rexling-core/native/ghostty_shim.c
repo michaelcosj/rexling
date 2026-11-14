@@ -19,6 +19,8 @@ typedef struct {
   GhosttyRenderStateRowCells cells;
   ApcFn callback;
   void *userdata;
+  uint64_t render_hold_generation;
+  bool semantic_seen, semantic_accepting;
 } RpTerminal;
 
 void rp_free(RpTerminal *t) {
@@ -39,6 +41,30 @@ static void unknown(GhosttyTerminal terminal, void *userdata,
     t->callback(t->userdata, (const uint8_t *)s.ptr, s.len);
   }
 }
+static void semantic_prompt(GhosttyTerminal terminal,void *userdata,const GhosttyTerminalSemanticPrompt *event) {
+  (void)terminal;
+  RpTerminal *t=userdata;t->semantic_seen=true;
+  switch(event->kind) {
+    case GHOSTTY_SEMANTIC_PROMPT_INPUT_START:t->semantic_accepting=true;break;
+    case GHOSTTY_SEMANTIC_PROMPT_OUTPUT_START:
+    case GHOSTTY_SEMANTIC_PROMPT_COMMAND_END:t->semantic_accepting=false;break;
+    case GHOSTTY_SEMANTIC_PROMPT_PROMPT_START:
+      if(event->prompt_kind==GHOSTTY_SEMANTIC_PROMPT_PROMPT_PRIMARY)t->semantic_accepting=false;
+      break;
+    default:break;
+  }
+}
+static void render_hold(GhosttyTerminal terminal, void *userdata, bool held) {
+  (void)terminal;
+  RpTerminal *t=userdata;
+  if(held)t->render_hold_generation++;
+}
+int rp_render_hold_state(RpTerminal *t,uint8_t *held,uint64_t *generation) {
+  GhosttyTerminalModeConfig mode={.mode=GHOSTTY_MODE_SYNCHRONIZED_OUTPUT};
+  int r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_MODE,&mode);
+  *held=mode.value?1:0;*generation=t->render_hold_generation;
+  return r;
+}
 #define RP_IMAGE_LIMIT (16ull * 1024 * 1024)
 int rp_graphics_init(GhosttySysDecodePngFn decode) {
   return ghostty_sys_set(GHOSTTY_SYS_OPT_DECODE_PNG, (const void *)decode);
@@ -49,6 +75,8 @@ uint8_t *rp_graphics_alloc(const GhosttyAllocator *allocator,size_t len) {
 static int configure(RpTerminal *t) {
   size_t limit = 65536;
   int r = ghostty_terminal_set(t->terminal, GHOSTTY_TERMINAL_OPT_USERDATA, t);
+  if(r==0)r=ghostty_terminal_set(t->terminal,GHOSTTY_TERMINAL_OPT_RENDER_HOLD,(const void *)render_hold);
+  if(r==0)r=ghostty_terminal_set(t->terminal,GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT,(const void *)semantic_prompt);
   if (r == 0) r = ghostty_terminal_set(t->terminal,
       GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE, (const void *)unknown);
   if (r == 0) r = ghostty_terminal_set(t->terminal,
@@ -168,14 +196,17 @@ void rp_scroll(RpTerminal *t, int32_t lines, int bottom) {
   ghostty_terminal_scroll_viewport(t->terminal, behavior);
 }
 int rp_input_flags(RpTerminal *t, uint8_t *flags) {
-  bool mouse=false;
+  bool mouse=false,at_prompt=false;
   GhosttyTerminalScreen screen=GHOSTTY_TERMINAL_SCREEN_PRIMARY;
   GhosttyTerminalModeConfig alt={.mode=GHOSTTY_MODE_MOUSE_ALTERNATE_SCROLL},cursor={.mode=GHOSTTY_MODE_CURSOR_KEYS};
   int r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING,&mouse);
   if(r==0) r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN,&screen);
   if(r==0) r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_MODE,&alt);
   if(r==0) r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_MODE,&cursor);
-  *flags=(mouse?1:0)|(screen==GHOSTTY_TERMINAL_SCREEN_ALTERNATE?2:0)|(alt.value?4:0)|(cursor.value?8:0);
+  if(r==0)r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT,&at_prompt);
+  bool accepting=at_prompt && (!t->semantic_seen || t->semantic_accepting);
+  bool known=screen==GHOSTTY_TERMINAL_SCREEN_PRIMARY && (t->semantic_seen || at_prompt);
+  *flags=(accepting?16:0)|(known?32:0)|(mouse?1:0)|(screen==GHOSTTY_TERMINAL_SCREEN_ALTERNATE?2:0)|(alt.value?4:0)|(cursor.value?8:0);
   return r;
 }
 static int rp_mouse(RpTerminal *t,GhosttyMouseButton button,int release,int col,int row,uint32_t cw,uint32_t ch,char *out,size_t capacity,size_t *len) {
@@ -211,6 +242,15 @@ int rp_wheel(RpTerminal *t,int down,int col,int row,uint32_t cw,uint32_t ch,char
 int rp_click(RpTerminal *t,int col,int row,uint32_t cw,uint32_t ch,char *out,size_t capacity,size_t *len) {
   return rp_mouse(t,GHOSTTY_MOUSE_BUTTON_LEFT,1,col,row,cw,ch,out,capacity,len);
 }
+static int semantic_row(RpTerminal *t,uint16_t y,GhosttyRowSemanticPrompt *kind,bool *continuation) {
+  GhosttyPoint point={.tag=GHOSTTY_POINT_TAG_VIEWPORT,.value.coordinate={.x=0,.y=y}};
+  GhosttyGridRef ref={0};GhosttyRow row=0;
+  int r=ghostty_terminal_grid_ref(t->terminal,point,&ref);
+  if(r==0)r=ghostty_grid_ref_row(&ref,&row);
+  if(r==0)r=ghostty_row_get(row,GHOSTTY_ROW_DATA_SEMANTIC_PROMPT,kind);
+  if(r==0)r=ghostty_row_get(row,GHOSTTY_ROW_DATA_WRAP_CONTINUATION,continuation);
+  return r;
+}
 int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
   int r = ghostty_render_state_update(t->render, t->terminal);
   if (r != 0) return r;
@@ -230,6 +270,23 @@ int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
   r=rp_input_flags(t,&frame->input_flags);if(r!=0)return r;
   frame->cursor_x=cursor.viewport_x; frame->cursor_y=cursor.viewport_y;
   frame->cursor_visible=cursor.visible && cursor.viewport_has_value;
+  int input_start=-1,input_end=-1;
+  if((frame->input_flags&16) && frame->cursor_visible && scrollbar.offset+scrollbar.len>=scrollbar.total) {
+    input_start=input_end=cursor.viewport_y;
+    for(int y=cursor.viewport_y;y>=0;y--) {
+      GhosttyRowSemanticPrompt kind=GHOSTTY_ROW_SEMANTIC_NONE;bool continuation=false;
+      r=semantic_row(t,(uint16_t)y,&kind,&continuation);if(r!=0)return r;
+      if(kind==GHOSTTY_ROW_SEMANTIC_PROMPT) {input_start=y;break;}
+      if(kind!=GHOSTTY_ROW_SEMANTIC_PROMPT_CONTINUATION && !continuation)break;
+      input_start=y;
+    }
+    for(int y=cursor.viewport_y+1;y<frame->rows;y++) {
+      GhosttyRowSemanticPrompt kind=GHOSTTY_ROW_SEMANTIC_NONE;bool continuation=false;
+      r=semantic_row(t,(uint16_t)y,&kind,&continuation);if(r!=0)return r;
+      if(kind!=GHOSTTY_ROW_SEMANTIC_PROMPT_CONTINUATION && !continuation)break;
+      input_end=y;
+    }
+  }
   memcpy(frame->foreground,&colors.foreground,3);
   memcpy(frame->background,&colors.background,3);
   GET(GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,&t->rows);
@@ -268,7 +325,7 @@ int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
         CELL(GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF,&buffer);
       }
       // Client-local row metadata occupies bits above the color-role fields.
-      uint32_t row_flags=(1u<<29)|((uint32_t)wrapped<<27)|((uint32_t)continuation<<28);
+      uint32_t row_flags=((input_start>=0 && y>=input_start && y<=input_end)?(1u<<30):0)|(1u<<29)|((uint32_t)wrapped<<27)|((uint32_t)continuation<<28);
       uint32_t flags=row_flags | ((style.flags & GHOSTTY_STYLE_FLAG_BOLD) != 0) | (((style.flags & GHOSTTY_STYLE_FLAG_ITALIC) != 0)<<1) | (((style.flags & GHOSTTY_STYLE_FLAG_FAINT) != 0)<<2) |
           (((style.flags & GHOSTTY_STYLE_FLAG_INVERSE) != 0)<<3) | (((style.flags & GHOSTTY_STYLE_FLAG_INVISIBLE) != 0)<<4) | (((style.flags & GHOSTTY_STYLE_FLAG_STRIKETHROUGH) != 0)<<5) |
           ((GHOSTTY_STYLE_UNDERLINE(style)!=0)<<6) | (fg_default<<7) | (bg_default<<8);

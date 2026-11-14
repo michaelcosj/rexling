@@ -859,3 +859,19 @@ Verified against Rex preview.19 (`ad5a836cb95bf1685a2b2976762949c44f1d0828`) usi
 Listeners bind 127.0.0.1 and keep their port across reconnects. Control reconnect tokens, session.attach and request-mode ownership restore the same tunnel block. Lost creation replies are reconciled by a per-worker UUID label. A control failure drops active streams, with no byte replay. Stop closes only the worker’s detached tunnel, with a bounded cleanup attempt. A force-stop or stop while unreachable may leave an orphan on Rex, removable through `rex forward close`. Forwarding remains independent of terminal control and the terminal API revision.
 
 The Android connected-device foreground service carries active forwards while the browser is open. Its notification provides Stop all. Removing Rexling from Recents stops the service. There is no automatic start at boot or after process death. This implementation provides local forwarding, equivalent to `-L`. Reverse/listen forwarding and management of tunnels created by other clients are not implemented.
+
+### Semantic input regions (OSC 133)
+
+libghostty parses shell-integration markers, including A/B/C/D, line-limited I,
+P prompt kinds, and N/L. The semantic callback tracks whether command input is
+active; the cursor-at-prompt and row metadata identify the current prompt and
+its soft-wrapped/continuation rows. Old prompts, output, history viewports and
+alternate screens are not marked as active input regions.
+
+Private JNI input flags add bit 4 (16: active semantic input) and bit 5 (32:
+semantic integration known on the primary screen). Cell attribute bit 30 marks
+current input rows, including empty cells. Existing RXT4 full/delta records carry
+these bits without a packet-layout change. Android uses these regions for
+tap-to-type while retaining mouse-click and hyperlink behavior. Programs without
+semantic integration retain existing tap behavior. OSC 133 does not generate
+activity notifications; those continue to use Rex program status.

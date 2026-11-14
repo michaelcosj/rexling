@@ -16,6 +16,9 @@ class TerminalImage(val id: Long,val generation: Long,val width: Int,val height:
 data class TerminalImagePlacement(val image: TerminalImage,val layer: Int,val z: Int,val col: Int,val row: Int,
     val offsetX: Int,val offsetY: Int,val width: Int,val height: Int,val sourceX: Int,val sourceY: Int,val sourceWidth: Int,val sourceHeight: Int)
 data class TerminalScreen(val columns: Int, val rows: Int, val cursorX: Int?, val cursorY: Int?, val foreground: Int, val background: Int, val cells: List<TerminalCell>, val scroll: TerminalScroll = TerminalScroll(), val lines: List<List<TerminalCell>> = cells.groupBy {it.y}.let {groups->List(rows){groups[it].orEmpty()}}, val inputFlags: Int=0,val images: List<TerminalImagePlacement> = emptyList(),val imageCellWidth: Int=8,val imageCellHeight: Int=16) {
+    val hasSemanticPrompt: Boolean get()=inputFlags and 32!=0
+    fun isSemanticInputRow(row: Int): Boolean = inputFlags and 16!=0 && scroll.below==0L &&
+        row in lines.indices && lines[row].any {it.attributes and (1 shl 30)!=0}
     val mouseTracking: Boolean get()=inputFlags and 1!=0
     val applicationScroll: Boolean get()=inputFlags and 1!=0 || inputFlags and 6==6
     fun plainText(): String = (0 until rows).joinToString("\n") { y ->

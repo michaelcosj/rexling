@@ -5,6 +5,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ModelsTest {
+    @Test fun semanticInputRequiresLiveInputMetadataAndTheBottomViewport() {
+        val cells=listOf(TerminalCell(0,1,"",-1,0,1 shl 30,1))
+        val screen=TerminalScreen(20,4,0,1,-1,0,cells,TerminalScroll(4,0,4),inputFlags=48)
+        assertTrue(screen.hasSemanticPrompt)
+        assertTrue(screen.isSemanticInputRow(1))
+        assertFalse(screen.isSemanticInputRow(0))
+        assertFalse(screen.isSemanticInputRow(-1))
+        assertFalse(screen.copy(inputFlags=32).isSemanticInputRow(1))
+        assertFalse(screen.copy(scroll=TerminalScroll(20,0,4)).isSemanticInputRow(1))
+        assertFalse(screen.copy(inputFlags=0).hasSemanticPrompt)
+    }
+
     @Test fun parsesWideCellsAndColorWithoutDuplicatingTheSpacer() {
         val screen = TerminalScreen.parse(JSONObject("""{"columns":4,"rows":1,"cursor":[3,0],"foreground":16777215,"background":0,"cells":[[0,0,"A",16777215,0,0,1],[1,0,"🦀",16777215,0,1,2],[2,0,"",16777215,0,0,0],[3,0,"",16777215,0,0,1]]}"""))
         assertEquals("A🦀", screen.plainText())

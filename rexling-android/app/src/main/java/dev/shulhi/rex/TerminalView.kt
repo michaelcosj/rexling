@@ -85,6 +85,7 @@ class TerminalView(context: Context) : View(context) {
     internal var onKeyboardFocus: (TerminalKeyboardFocus?)->Unit={}
     internal val keyboardFocus: TerminalKeyboardFocus? get() {
         val frame=screen ?: return null
+        if(frame.scroll.below>0) return null
         val row=frame.cursorY?.takeIf {it in 0 until frame.rows} ?: return null
         val lastText=frame.lines.indexOfLast {cells->cells.any {cell->cell.width>0 && cell.text.any {it!='\u0000' && !it.isWhitespace()}}}
         val bottom=insetTop+(row+1)*cellHeight+insetBottom
@@ -454,7 +455,15 @@ class TerminalView(context: Context) : View(context) {
                 col !in 0 until frame.columns || row !in 0 until frame.rows) return
             super.performClick()
             onMouseClick(col,row,cellWidth.roundToInt().coerceAtLeast(1),cellHeight.roundToInt().coerceAtLeast(1))
-            if(frame.cursorX!=null && row==frame.cursorY) onCursorTap()
+            if(frame.isSemanticInputRow(row)) keyboard()
+            else if(frame.cursorX!=null && row==frame.cursorY) onCursorTap()
+        } else if(controlled && frame?.hasSemanticPrompt==true) {
+            val row=floor((y-insetTop)/cellHeight).toInt()
+            if(pressedMouseTarget!=mouseTarget() || pressedMouseGrid!=(frame.columns to frame.rows) ||
+                x<insetHorizontal || x>=width-insetHorizontal || y<insetTop || y>=height-insetBottom) return
+            super.performClick()
+            if(frame.isSemanticInputRow(row)) keyboard()
+            else if(frame.scroll.below==0L && frame.cursorX!=null && row==frame.cursorY) onCursorTap()
         } else performClick()
     }
     private fun clearSelection() {

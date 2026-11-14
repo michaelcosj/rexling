@@ -1,0 +1,30 @@
+{
+  "build": 117,
+  "problem": "A hidden/off-viewport cursor produced null keyboard focus and reset panning to zero; restoring the cursor moved the entire pane again.",
+  "fix": "Remember the last valid keyboard focus per pane, keep its viewport position through hidden-cursor frames, and avoid following a cursor while reading scrollback.",
+  "validation": {
+    "device": "Samsung S22+ with Gboard; isolated test app",
+    "passed": 8,
+    "release_lint": "passed",
+    "checks": [
+      "eight repeated live/hidden/history frame transitions leave the actual Android view Y position unchanged",
+      "grid dimensions remain unchanged while scrolling",
+      "real Gboard opening/closing keeps the grid stable",
+      "top prompts remain stationary and bottom prompt footers remain visible",
+      "new live frames are not replaced by stale Compose frames"
+    ],
+    "native_workspace_passed": 92,
+    "native_optional_ignored": 18,
+    "unit_tests": "passed"
+  },
+  "native_redraw": {
+    "fix": "Honor libghostty synchronized output holds rather than publishing intermediate clear/partial frames; retain the previous complete frame.",
+    "safety_timeout_ms": 1000,
+    "tests": [
+      "real actor plus loopback protocol peers keep the same complete frame during delayed clear/partial redraw, then publish the completed redraw",
+      "a stuck hold expires after one second",
+      "a new hold resets the timer even when end/start share one input chunk",
+      "resizing releases the hold"
+    ]
+  }
+}

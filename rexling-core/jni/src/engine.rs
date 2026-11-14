@@ -479,8 +479,9 @@ impl Actor {
                     if self.visible && (self.dirty || animation_at.is_some_and(|at|at<=now)) {
                         self.dirty=false;animation_at=None;
                         if let Some(replica)=self.replica.as_mut().filter(|r|r.ready()) {
-                            match replica.terminal().and_then(|t|t.frame()) {
-                                Ok(frame)=>{animation_at=frame.next_image_delay_ms.map(|ms|now+Duration::from_millis(ms));self.screen=Some(Arc::new(frame));self.publish_frame();}
+                            match replica.terminal().and_then(|t|if t.render_ready()? {t.frame().map(Some)} else {Ok(None)}) {
+                                Ok(Some(frame))=>{animation_at=frame.next_image_delay_ms.map(|ms|now+Duration::from_millis(ms));self.screen=Some(Arc::new(frame));self.publish_frame();}
+                                Ok(None)=>{self.dirty=true;}
                                 Err(e)=>{self.error=e.to_string();self.publish();}
                             }
                         }
