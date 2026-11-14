@@ -111,7 +111,7 @@ import dev.chrisbanes.haze.hazeSource
             val frame=if(block.id==liveBlock && liveScreen!=null) liveScreen else frames[block.id]
             val pageOffset=offset*stride
             key(block.id) {
-                var cursorBottom by remember {mutableStateOf<Float?>(null)}
+                var keyboardFocus by remember {mutableStateOf<TerminalKeyboardFocus?>(null)}
                 Box(Modifier.width(cardWidth).fillMaxHeight().graphicsLayer {
                     val position=pageOffset+drag
                     translationX=kotlin.math.round(leftPx+position)
@@ -120,10 +120,10 @@ import dev.chrisbanes.haze.hazeSource
                     .then(if(center) Modifier else Modifier.clickable(role=Role.Button){latestSelect(block.id)})) {
                     Box(Modifier.fillMaxSize()) {
                         if(frame!=null) AndroidView(
-                            factory={TerminalView(it)},modifier=Modifier.fillMaxSize().terminalImeViewport(imeInsets,navigationInsets) {cursorBottom}.clipToBounds(),
+                            factory={TerminalView(it)},modifier=Modifier.fillMaxSize().terminalImeViewport(imeInsets,navigationInsets) {keyboardFocus}.clipToBounds(),
                             update={view ->
-                                view.onCursorViewportBottom={cursorBottom=it}
-                                cursorBottom=view.cursorViewportBottom
+                                view.onKeyboardFocus={keyboardFocus=it}
+                                keyboardFocus=view.keyboardFocus
                                 view.onDimensions=if(center && block.id==liveBlock) onDimensions else {_,_->}
                                 view.setTerminalPaddingDp(12,8,if(bottomControlsInset>0.dp || blocks.size>1) 28 else 6)
                                 view.palette=palette;view.textSp=fontSize

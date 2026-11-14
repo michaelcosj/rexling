@@ -1,0 +1,16 @@
+{
+  "build": 116,
+  "problem": "Cursor-only panning clipped Codex status/help lines below the prompt under the fixed pane indicator.",
+  "fix": "Include the last nonblank terminal text row and footer inset when it fits with the cursor; keep a distant bottom status bar from pushing a top cursor out of view.",
+  "validation": {
+    "physical_phone": "Samsung S22+ with Gboard, isolated rendering test package",
+    "passed": 4,
+    "checks": [
+      "stable grid and cached rows through keyboard animation",
+      "top cursor stays put",
+      "cursor several rows above the bottom and its last footer line both physically remain above the viewport controls",
+      "pane frame presentation remains correct"
+    ],
+    "release_lint": "passed"
+  }
+}

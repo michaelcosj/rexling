@@ -39,15 +39,15 @@ class TerminalImeViewportTest {
     @Test fun keyboardAnimationKeepsTheGridAndCachedRowsStable() {
         var covered by mutableIntStateOf(0);var legacy by mutableStateOf(true)
         val dimensions=mutableListOf<Pair<Int,Int>>();lateinit var view: TerminalView
-        var fullHeight=0;var visibleHeight=0;var viewportTop=0f;var cursorBottom by mutableStateOf<Float?>(null)
+        var fullHeight=0;var visibleHeight=0;var viewportTop=0f;var cursorBottom by mutableStateOf<TerminalKeyboardFocus?>(null)
         ui.setContent {MaterialTheme {
             val density=LocalDensity.current
             Box(Modifier.width(360.dp).height(640.dp)) {
                 key(legacy) {
                     Box(Modifier.fillMaxWidth().height(with(density){(640.dp.toPx().toInt()-covered).toDp()}).clipToBounds().onSizeChanged {visibleHeight=it.height}) {
-                        AndroidView(factory={TerminalView(it).also {v->view=v;attach(v,dimensions);v.onCursorViewportBottom={cursorBottom=it}}},
+                        AndroidView(factory={TerminalView(it).also {v->view=v;attach(v,dimensions);v.onKeyboardFocus={cursorBottom=it}}},
                             modifier=Modifier.fillMaxSize().then(if(legacy) Modifier else Modifier.terminalImeViewport(WindowInsets(bottom=covered),WindowInsets(0,0,0,0)) {cursorBottom}),
-                            update={cursorBottom=it.cursorViewportBottom})
+                            update={cursorBottom=it.keyboardFocus})
                     }
                 }
             }
@@ -77,14 +77,14 @@ class TerminalImeViewportTest {
     }
     @Test fun realKeyboardDoesNotResizeTheTerminalAndTopPromptStaysPut() {
         val dimensions=mutableListOf<Pair<Int,Int>>();lateinit var view: TerminalView
-        var visibleHeight=0;var viewportTop=0f;var cursorBottom by mutableStateOf<Float?>(null)
+        var visibleHeight=0;var viewportTop=0f;var cursorBottom by mutableStateOf<TerminalKeyboardFocus?>(null)
         ui.setContent {MaterialTheme {
             val ime=WindowInsets.ime;val navigation=WindowInsets.navigationBars
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
                 Spacer(Modifier.height(48.dp))
                 Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().onSizeChanged {visibleHeight=it.height}.onGloballyPositioned {viewportTop=it.positionInWindow().y}) {
-                    AndroidView(factory={TerminalView(it).also {v->view=v;attach(v,dimensions,true);v.controlled=true;v.onCursorViewportBottom={cursorBottom=it}}},
-                        modifier=Modifier.fillMaxSize().terminalImeViewport(ime,navigation) {cursorBottom},update={cursorBottom=it.cursorViewportBottom})
+                    AndroidView(factory={TerminalView(it).also {v->view=v;attach(v,dimensions,true);v.controlled=true;v.onKeyboardFocus={cursorBottom=it}}},
+                        modifier=Modifier.fillMaxSize().terminalImeViewport(ime,navigation) {cursorBottom},update={cursorBottom=it.keyboardFocus})
                 }
                 Spacer(Modifier.height(48.dp))
             }
@@ -105,13 +105,14 @@ class TerminalImeViewportTest {
                 assertEquals("A prompt near the top must not move",0,terminalImePan(cursorBottom,visibleHeight,height-visibleHeight))
                 val position=IntArray(2);view.getLocationInWindow(position)
                 assertEquals(viewportTop.toInt(),position[1])
-                val grid=view.screen!!;view.screen=grid.copy(cursorY=grid.rows-1)
+                val grid=view.screen!!;view.screen=grid.copy(cursorY=grid.rows-4)
             }
             ui.waitForIdle()
             ui.runOnIdle {
                 assertTrue("Bottom prompt must move above the keyboard",terminalImePan(cursorBottom,visibleHeight,height-visibleHeight)>0)
                 val position=IntArray(2);view.getLocationInWindow(position)
-                assertTrue("The actual cursor must be above the controls",position[1]+cursorBottom!!<=viewportTop+visibleHeight+1)
+                assertTrue("The actual cursor must be above the controls",position[1]+cursorBottom!!.cursorBottom<=viewportTop+visibleHeight+1)
+                assertTrue("Prompt footer and status lines must also be visible",position[1]+cursorBottom!!.contentBottom<=viewportTop+visibleHeight+1)
                 assertTrue("Only enough of the pane should move",position[1]<viewportTop)
                 view.hideKeyboard()
             }
