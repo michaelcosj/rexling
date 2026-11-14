@@ -40,8 +40,8 @@ internal data class WatchedPane(val server: String,val endpoint: String,val sess
 
 internal object ActivityFocusPolicy {
     fun acknowledge(profile: ServerProfile,records: List<ActivityRecord>,watched: WatchedPane?,seen: (ActivityRecord)->Boolean)=
-        records.filter {it.state.notifiable && watched?.contains(profile,it)==true && !seen(it)}
-    fun unread(records: List<ActivityRecord>,seen: (ActivityRecord)->Boolean)=records.count {it.state.notifiable && !seen(it)}
+        records.filter {it.notifiable && watched?.contains(profile,it)==true && !seen(it)}
+    fun unread(records: List<ActivityRecord>,seen: (ActivityRecord)->Boolean)=records.count {it.notifiable && !seen(it)}
     fun watched(profile: ServerProfile,state: AppState,foreground: Boolean,obscured: Boolean,hasScreen: Boolean,navigating: Boolean,
         interactive: Boolean,locked: Boolean): WatchedPane? = if(foreground && !obscured && hasScreen && !navigating && interactive && !locked &&
             state.connected && state.selectedSession.isNotBlank() && state.selectedBlock.isNotBlank())

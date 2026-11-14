@@ -20,12 +20,12 @@ internal class AttentionLedger(saved: String?=null) {
         val source=listOf(server.id,server.endpoint).joinToString("") {"${it.length}:$it"}
         records.forEach {record->
             val version=record.attentionVersion.ifBlank {listOf(record.state.wire,record.kind,record.updated,record.message).joinToString("\u0000")}
-            val stamp=when {record.state==ActivityState.DONE->"done:$version";record.state.notifiable->"attention:$version";else->"state:${record.state.wire}"}
+            val stamp=when {record.state==ActivityState.DONE->"done:$version";record.notifiable->"attention:$version";else->"state:${record.state.wire}"}
             val key=key(server,record)
             if(stamps[key]!=stamp) {
                 stamps.remove(key);stamps[key]=stamp
                 val freshCompletion=record.state!=ActivityState.DONE || source in baselinedServers || key in observedThisRun
-                if(record.state.notifiable && freshCompletion && background && !seen(record)) alerts+=record
+                if(record.notifiable && freshCompletion && background && !seen(record)) alerts+=record
             }
             observedThisRun+=key
         }

@@ -67,6 +67,7 @@ class TerminalView(context: Context) : View(context) {
     var onWheel: (Int,Int,Int,Int,Int) -> Unit = {lines,_,_,_,_->onScroll(lines)}
     var onActivate: () -> Unit = {}
     var onMouseClick: (Int,Int,Int,Int) -> Unit = {_,_,_,_->}
+    internal var onSemanticCopy: ((TerminalScreen,Int,Int,Boolean)->Boolean)?=null
     internal var onCursorTap: ()->Unit = {}
     var mouseTarget: ()->String={""}
     private var pressedMouseTarget=""
@@ -466,6 +467,12 @@ class TerminalView(context: Context) : View(context) {
             else if(frame.scroll.below==0L && frame.cursorX!=null && row==frame.cursorY) onCursorTap()
         } else performClick()
     }
+    internal fun copySemanticSelection(output: Boolean): Boolean {
+        val selected=selection ?: return false
+        if(!selected.frame.hasSemanticPrompt || selectionInputTarget!=imageInputTarget()) return false
+        if(onSemanticCopy?.invoke(selected.frame,selected.first.column,selected.first.row,output)!=true) return false
+        selectionMode?.finish();return true
+    }
     private fun clearSelection() {
         removeCallbacks(longPress)
         selection=null;selectionLink=null;selectionInputTarget=null;selectionTouch=false
@@ -522,6 +529,10 @@ class TerminalView(context: Context) : View(context) {
                 menu.add(0,android.R.id.paste,1,"Paste").setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
                 menu.findItem(android.R.id.paste).isVisible=canPasteSelection()
                 menu.add(0,android.R.id.selectAll,2,"Select all").setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+                if(frame.hasSemanticPrompt && onSemanticCopy!=null) {
+                    menu.add(0,0x524504,3,"Copy command").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+                    menu.add(0,0x524505,4,"Copy output").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+                }
                 if(selectionLink!=null) {
                     menu.add(0,0x524501,2,"Open link").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
                     menu.add(0,0x524502,3,"Copy link address").setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
@@ -541,6 +552,7 @@ class TerminalView(context: Context) : View(context) {
                 }
                 android.R.id.paste -> pasteSelection()
                 android.R.id.selectAll -> {selection?.all();selectionLink=null;invalidate();mode.invalidate();mode.invalidateContentRect();true}
+                0x524504,0x524505 -> copySemanticSelection(item.itemId==0x524505)
                 0x524501 -> selectedLinkAction(TerminalLinkAction.OPEN)
                 0x524502 -> selectedLinkAction(TerminalLinkAction.COPY_ADDRESS)
                 0x524503 -> selectedLinkAction(TerminalLinkAction.SHARE)

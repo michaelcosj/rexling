@@ -32,6 +32,22 @@ class ArrowJoystickTest {
             }
         }}
     }
+    @Test fun commandNavigationWorksWithoutControlAndDoesNotSendTerminalKeys() {
+        val prompts=mutableListOf<Int>()
+        ui.setContent {MaterialTheme {
+            Box(Modifier.size(320.dp,280.dp)) {
+                ArrowJoystickDockKey(false,Modifier.align(Alignment.Center).size(40.dp,37.dp),{sent+=it},
+                    onPrompt={prompts+=it})
+            }
+        }}
+        ui.onNodeWithContentDescription("Arrow keys").performTouchInput {click()}
+        ui.onNodeWithContentDescription("Arrow key popup").assertIsDisplayed()
+        ui.onNodeWithText("Prev command").performClick();ui.onNodeWithText("Next command").performClick()
+        ui.onNodeWithContentDescription("Arrow key popup").assertIsDisplayed()
+        ui.runOnIdle {assertEquals(listOf(-1,1),prompts);assertTrue(sent.isEmpty())}
+        ui.onNodeWithContentDescription("Arrow keys").performTouchInput {click()}
+        ui.onNodeWithContentDescription("Arrow key popup").assertDoesNotExist()
+    }
     @Test fun neutralHoldAndTapNeverSendAKey() {
         fixture();ui.mainClock.autoAdvance=false
         val key=ui.onNodeWithContentDescription("Arrow keys")

@@ -47,7 +47,7 @@ import androidx.compose.ui.unit.dp
         Column(Modifier.fillMaxWidth().height(panelHeight).padding(bottom=4.dp).semantics {paneTitle="Activity"}) {
             Row(Modifier.fillMaxWidth().heightIn(min=48.dp).padding(start=16.dp,end=4.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text("Activity",Modifier.weight(1f),style=SettingsType.row,fontWeight=FontWeight.Bold)
-                TextButton(onClick=onMarkAll,contentPadding=PaddingValues(horizontal=8.dp),enabled=sources.any {source->source.connected && source.items.any {it.state.notifiable && it.key !in source.seen}}) {Text("Mark seen",style=SettingsType.detail)}
+                TextButton(onClick=onMarkAll,contentPadding=PaddingValues(horizontal=8.dp),enabled=sources.any {source->source.connected && source.items.any {it.notifiable && it.key !in source.seen}}) {Text("Mark seen",style=SettingsType.detail)}
                 ChromeButton(ChromeIcon.REFRESH,"Refresh activity",sources.any {it.connected},onClick=onRefresh)
                 ChromeButton(ChromeIcon.CLOSE,"Close activity",onClick=onClose)
             }
@@ -79,7 +79,7 @@ import androidx.compose.ui.unit.dp
                             else if(source.partial) Text("Some activity could not be refreshed.",style=SettingsType.detail,color=scheme.onSurfaceVariant)
                         }
                         items(records,key={"${source.server.id}:${it.key}"}) {record->
-                            val seen=record.state.notifiable && record.key in source.seen
+                            val seen=record.notifiable && record.key in source.seen
                             Row(Modifier.fillMaxWidth().heightIn(min=56.dp).clip(RoundedCornerShape(12.dp)).background(scheme.surfaceVariant.copy(alpha=.45f))
                                 .semantics {contentDescription="${record.label}, ${record.stateLabel}, ${record.sessionLabel}, ${source.server.label}"
                                     stateDescription=listOf(record.stateLabel,if(seen) "Seen" else "",record.progress?.let {"$it%"}.orEmpty()).filter {it.isNotBlank()}.joinToString(" · ")}
@@ -87,7 +87,7 @@ import androidx.compose.ui.unit.dp
                                 verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                                 ActivityIdentity(record,seen,Modifier.weight(1f))
                                 Box(Modifier.width(68.dp),contentAlignment=Alignment.CenterEnd) {
-                                    if(record.state.notifiable && !seen) TextButton(
+                                    if(record.notifiable && !seen) TextButton(
                                         onClick={onSeen(ActivityTarget(source.server,record))},enabled=source.connected,
                                         modifier=Modifier.height(36.dp).semantics {contentDescription="Mark ${record.label} seen"},
                                         shape=RoundedCornerShape(8.dp),contentPadding=PaddingValues(0.dp),
@@ -116,13 +116,16 @@ import androidx.compose.ui.unit.dp
     val scheme=MaterialTheme.colorScheme
     val iconSlot=with(LocalDensity.current) {39.sp.toDp()}*(61f/48f)
     Layout(modifier=modifier,content={
-        ActivityStateBar(record.state,seen,Modifier.semantics {testTag="Activity state ${record.key}"})
+        ActivityStateBar(record.state,seen,Modifier.semantics {testTag="Activity state ${record.key}"},if(record.progressOnly) record.terminalProgress else null)
         PaneProgramTile(record.program,Modifier.semantics {testTag="Activity program ${record.key}"},large=true,rotation=0f)
         Column(verticalArrangement=Arrangement.spacedBy(1.dp)) {
             Text(record.label,style=SettingsType.row,maxLines=1,overflow=TextOverflow.Ellipsis)
-            Text(listOf(record.message,record.context).filter {it.isNotBlank()}.distinct().joinToString(" · "),style=SettingsType.detail,
+            Text(listOf(record.message,record.terminalProgress?.description ?: record.progress?.let {"$it%"}.orEmpty(),record.context).filter {it.isNotBlank()}.distinct().joinToString(" · "),style=SettingsType.detail,
                 color=scheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
-            record.progress?.let {progress->LinearProgressIndicator(progress={progress/100f},modifier=Modifier.fillMaxWidth().height(2.dp))}
+            val report=record.terminalProgress
+            val progress=record.progress ?: report?.percent
+            if(progress!=null) LinearProgressIndicator(progress={progress/100f},color=terminalProgressColor(report),modifier=Modifier.fillMaxWidth().height(2.dp))
+            else if(report?.busy==true) LinearProgressIndicator(color=scheme.primary,modifier=Modifier.fillMaxWidth().height(2.dp))
         }
     }) {children,constraints->
         val railWidth=3.dp.roundToPx();val gap=8.dp.roundToPx()
@@ -141,12 +144,13 @@ import androidx.compose.ui.unit.dp
 }
 
 /** Working and unseen attention animate; phase is read only while drawing. */
-@Composable internal fun ActivityStateBar(state: ActivityState,seen: Boolean,modifier: Modifier) {
+@Composable internal fun ActivityStateBar(state: ActivityState,seen: Boolean,modifier: Modifier,progress: TerminalProgress?=null) {
     val scheme=MaterialTheme.colorScheme
-    val working=state==ActivityState.WORKING
+    val working=state==ActivityState.WORKING && progress?.state !in listOf("pause","error")
     val needsYou=state==ActivityState.BLOCKED && !seen
     val phase=rememberWorkingPhase(working || needsYou)
     val color=when {
+        progress?.state=="pause" || progress?.state=="error"->terminalProgressColor(progress)
         seen->scheme.onSurfaceVariant.copy(alpha=.22f)
         state==ActivityState.BLOCKED->if(LocalTerminalPalette.current.dark) Color(0xffe6a947) else Color(0xffb77710)
         state==ActivityState.ERROR->scheme.error
@@ -159,4 +163,10 @@ import androidx.compose.ui.unit.dp
         drawWorkingBar(color.copy(alpha=color.alpha*brightness),Offset.Zero,size,
             vertical=true,radius=radius)
     }
+}
+
+@Composable internal fun terminalProgressColor(progress: TerminalProgress?) = when(progress?.state) {
+    "error"->MaterialTheme.colorScheme.error
+    "pause"->if(LocalTerminalPalette.current.dark) Color(0xffe6a947) else Color(0xffb77710)
+    else->MaterialTheme.colorScheme.primary
 }

@@ -875,3 +875,85 @@ these bits without a packet-layout change. Android uses these regions for
 tap-to-type while retaining mouse-click and hyperlink behavior. Programs without
 semantic integration retain existing tap behavior. OSC 133 does not generate
 activity notifications; those continue to use Rex program status.
+
+### Remote clipboard writes (OSC 52)
+
+libghostty's clipboard-write callback supplies decoded text/plain data. The shim
+forwards at most 256 KiB per write; invalid UTF-8 and unsupported content are
+ignored. Only live stream writes produce an event, never snapshot restoration.
+The latest write is coalesced with a monotonic serial and the source block,
+connection epoch and navigation ID in private JNI metadata. Android consumes
+that serial once and writes to its clipboard only while foreground, viewing the
+matching pane, and not navigating. Background/stale writes are discarded rather
+than replayed. Standard and primary-selection text are mapped to Android's single
+clipboard. Remote reads have no callback and remain denied. Normal Paste uses
+the existing clipboard/input path, including bracketed-paste handling.
+
+### OSC 133 command navigation
+
+The arrow popup offers Previous/Next command when semantic prompt information
+is known. The guarded `scroll_prompt` command carries session, block, navigation
+ID and connection epoch, and moves the local viewport with libghostty's public
+DELTA_PROMPT API. It neither sends terminal keys nor claims ownership, works on
+retained history while disconnected, and ignores stale/hidden targets. Prompt
+boundaries survive native snapshots and reflow; unmarked and alternate-screen
+terminals remain unchanged. Input hit regions use the cursor's position even
+when the program hides the visual cursor.
+
+### Copy command / output
+
+Long-press selection offers Copy command and Copy output when OSC 133 integration
+is known. A guarded `copy_semantic` request identifies the source session, pane,
+epoch, navigation, viewport dimensions/history position and frozen visible text.
+If the terminal changed, extraction is rejected rather than using a different
+command. No ownership or network connection is needed for retained history.
+
+The public libghostty selection/formatter APIs extract the command's retained
+output and unwrap soft-wrapped lines. Command extraction uses semantic INPUT
+cells and omits primary/continuation prompt text, preserving real line breaks.
+Both are bounded to the Android clipboard's 256 KiB text budget. Explicit local
+copies use the existing deduplicated clipboard-delivery path, including while
+offline; remote OSC 52 writes still require a live foreground connection.
+
+### OSC 9;4 progress
+
+The canonical Rex server reports this terminal effect through `progress_report`
+events (control session events and nonce-bound data APCs). The client validates,
+coalesces and scopes reports to the source session/pane. Set reports carry a
+0–100 percentage; indeterminate reports omit it. Pause/error can retain the prior
+percentage. Remove clears progress without inventing a completion notification.
+Process replacement/exit, pane removal and connection loss clear stale reports.
+Initial progress depends on the server delivering a report; no current-progress
+query is present in the discovered API.
+
+Tabs use a thin percentage bar or moving highlight, amber for paused and the
+error colour for failed progress. Activity enriches active root OSC 7501 records
+when they lack their own percentage, preserving their state and notification
+identity. Otherwise an ephemeral progress-only row appears for the pane. These
+rows never contribute unread dots, mark-seen actions or Android notifications.
+
+Run `sh rexling-android/scripts/demo-progress.sh` in a Rex terminal to exercise
+all states. Cargo can be explicitly enabled with
+`env CARGO_TERM_PROGRESS_TERM_INTEGRATION=true cargo build`.
+
+### Pasting SSH private keys
+
+The SSH host editor offers Paste SSH key alongside file import. Clipboard text
+is read only after that explicit action, then shown in a masked, editable field
+with password keyboard input and suggestions disabled. Empty clipboards allow
+manual pasting. Pasted and file keys share the 128 KiB limit, passphrase parser,
+validation and Android Keystore encrypted storage. Drafts are not saved across
+host changes or dialog cancellation, and importing prevents duplicate submission.
+
+### Current-word IME editing and compact server editor
+
+The terminal exposes a real Editable for the currently pending IME composition,
+including surrounding/extracted text, selection and composing regions. Batch
+edits finalize locally before sending text; a newly composing suffix stays local
+when a committed prefix is flushed. Unicode-aware local cursor/backspace keys
+never delete remote text while a word remains pending. Finalized input still
+uses the ordered terminal-input path, and stale connection targets are rejected.
+This does not expose or make already-sent remote terminal text editable by IMEs.
+
+The server editor places its icon selector beside the name and uses settings
+font sizes. A compact SSH-key section keeps import, paste and removal together.

@@ -1,12 +1,14 @@
 package dev.shulhi.rex
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,10 +38,11 @@ import kotlin.math.abs
 private val arrowIcons=mapOf("left" to ChromeIcon.LEFT,"down" to ChromeIcon.DOWN,"up" to ChromeIcon.UP,"right" to ChromeIcon.RIGHT)
 
 /** Claims the whole press/slide gesture; a neutral center pauses repeat without releasing. */
-@Composable internal fun ArrowJoystickDockKey(enabled: Boolean,modifier: Modifier,onKey: (String)->Unit,readable: Boolean=enabled,inputKey: String="",keyboardVisible: Boolean=true,useJoystick: Boolean=true) {
+@Composable internal fun ArrowJoystickDockKey(enabled: Boolean,modifier: Modifier,onKey: (String)->Unit,readable: Boolean=enabled,inputKey: String="",keyboardVisible: Boolean=true,useJoystick: Boolean=true,onPrompt: ((Int)->Unit)?=null) {
     var active by remember(inputKey) {mutableStateOf(false)}
     var popupOpen by remember(inputKey) {mutableStateOf(false)}
-    LaunchedEffect(enabled,useJoystick) {popupOpen=false}
+    val available=enabled || onPrompt!=null
+    LaunchedEffect(available,useJoystick) {popupOpen=false}
     var direction by remember(inputKey) {mutableStateOf<String?>(null)}
     var displacement by remember(inputKey) {mutableStateOf(Offset.Zero)}
     val latest by rememberUpdatedState(onKey)
@@ -55,13 +58,13 @@ private val arrowIcons=mapOf("left" to ChromeIcon.LEFT,"down" to ChromeIcon.DOWN
         .background(if(active || popupOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
         .semantics {
             contentDescription="Arrow keys";role=Role.Button;selected=active || popupOpen
-            stateDescription=if(popupOpen) "Arrow popup expanded" else if(active) direction?.let {"${it.replaceFirstChar(Char::uppercaseChar)} arrow"} ?: "Neutral" else if(useJoystick) "Hold and slide or double tap for arrows" else "Tap for arrows"
-            if(enabled) {
+            stateDescription=if(popupOpen) "Arrow popup expanded" else if(active) direction?.let {"${it.replaceFirstChar(Char::uppercaseChar)} arrow"} ?: "Neutral" else if(useJoystick && enabled) "Hold and slide or double tap for arrows" else "Tap for arrows"
+            if(available) {
                 onClick(label="Toggle arrow popup") {popupOpen=!popupOpen;true}
-                customActions=arrowIcons.keys.map {key->CustomAccessibilityAction("${key.replaceFirstChar(Char::uppercaseChar)} arrow") {latest(key);true}}
+                customActions=(if(enabled) arrowIcons.keys.toList() else emptyList()).map {key->CustomAccessibilityAction("${key.replaceFirstChar(Char::uppercaseChar)} arrow") {latest(key);true}}
             } else disabled()
-        }.pointerInput(enabled,inputKey,deadZone,useJoystick) {
-            if(!enabled) return@pointerInput
+        }.pointerInput(enabled,available,inputKey,deadZone,useJoystick) {
+            if(!available) return@pointerInput
             coroutineScope {
                 var lastTap: Long?=null
                 awaitEachGesture {
@@ -83,7 +86,7 @@ private val arrowIcons=mapOf("left" to ChromeIcon.LEFT,"down" to ChromeIcon.DOWN
                             if(!change.pressed) {
                                 if(!steering && change.position.x in 0f..size.width.toFloat() && change.position.y in 0f..size.height.toFloat()) {
                                     if(closingPopup) popupOpen=false
-                                    else if(!useJoystick) popupOpen=true
+                                    else if(!useJoystick || !enabled) popupOpen=true
                                     else if(change.uptimeMillis-down.uptimeMillis<configuration.longPressTimeoutMillis) {
                                         if(doubleTap) popupOpen=!popupOpen else lastTap=change.uptimeMillis
                                     }
@@ -94,7 +97,7 @@ private val arrowIcons=mapOf("left" to ChromeIcon.LEFT,"down" to ChromeIcon.DOWN
                             // press stays neutral until the finger deliberately moves.
                             if(!steering && (change.position-down.position).getDistance()<configuration.touchSlop) continue
                             steering=true
-                            if(!useJoystick) continue
+                            if(!useJoystick || !enabled) continue
                             popupOpen=false
                             val delta=change.position-center
                             displacement=delta
@@ -120,10 +123,20 @@ private val arrowIcons=mapOf("left" to ChromeIcon.LEFT,"down" to ChromeIcon.DOWN
         if(active && enabled && useJoystick && !popupOpen) Popup(popupPositionProvider=provider,properties=PopupProperties(focusable=false,dismissOnClickOutside=false,dismissOnBackPress=false,clippingEnabled=false)) {
             ArrowJoystickFace(direction,displacement,if(keyboardVisible) 88.dp else 52.dp,if(keyboardVisible) 14.dp else 12.dp)
         }
-        if(popupOpen && enabled) Popup(popupPositionProvider=popupProvider,onDismissRequest={popupOpen=false},
+        if(popupOpen && available) Popup(popupPositionProvider=popupProvider,onDismissRequest={popupOpen=false},
             properties=PopupProperties(focusable=false,dismissOnClickOutside=false,dismissOnBackPress=false)) {
             SpeechBubble(popupProvider,Modifier.width(200.dp).semantics {contentDescription="Arrow key popup"},shadowElevation=0.dp) {
-                Box(Modifier.padding(8.dp)) {ArrowKeyPad(enabled,Modifier.fillMaxWidth().height(100.dp),latest,readable,inputKey)}
+                Column(Modifier.padding(8.dp)) {
+                    ArrowKeyPad(enabled,Modifier.fillMaxWidth().height(100.dp),latest,readable,inputKey)
+                    if(onPrompt!=null) Row(Modifier.fillMaxWidth().padding(top=4.dp),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                        listOf(-1 to "Prev command",1 to "Next command").forEach {(direction,label)->
+                            Box(Modifier.weight(1f).height(32.dp).clip(RoundedCornerShape(8.dp))
+                                .clickable(role=Role.Button) {onPrompt(direction)},contentAlignment=Alignment.Center) {
+                                Text(label,fontSize=11.sp,color=MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    }
+                }
             }
         }
     }

@@ -1,4 +1,5 @@
 mod activity;
+mod progress;
 mod engine;
 mod updates;
 mod uploads;

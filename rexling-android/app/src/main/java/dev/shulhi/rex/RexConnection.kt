@@ -21,6 +21,10 @@ internal class RexConnection(application: Application, private val scope: Corout
         private set
     var paneFrames by mutableStateOf<Map<String,TerminalScreen>>(emptyMap())
         private set
+    private val clipboard=application.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    var hasSemanticPrompts by mutableStateOf(false)
+        private set
+    private val clipboardDelivery=TerminalClipboardDelivery {text->clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Terminal",text))}
     private var tabMoveSerial=0L
     private var pendingTabOrder by mutableStateOf<PendingTabOrder?>(null)
     private var paneMoveSerial=0L
@@ -101,6 +105,14 @@ internal class RexConnection(application: Application, private val scope: Corout
         val current=state.value
         val live=current.selectedBlock.ifBlank {if(current.phase=="preview") "preview" else ""}
         if(block!=live) return false
+        view.onSemanticCopy={frame,col,row,output->
+            val active=state.value
+            if(!visible || !foreground || navigationRequest.pending || active.selectedBlock!=block) false
+            else command("copy_semantic","session" to active.selectedSession,"block" to block,
+                "navigationId" to active.navigationId,"connectionEpoch" to active.connectionEpoch,
+                "columns" to frame.columns,"rows" to frame.rows,"scrollTotal" to frame.scroll.total,
+                "scrollOffset" to frame.scroll.offset,"viewport" to frame.plainText(),"col" to col,"row" to row,"output" to output)
+        }
         view.onCursorTap={
             val active=state.value
             // Program identity must be live, not the last-known chrome cache.
@@ -196,6 +208,7 @@ internal class RexConnection(application: Application, private val scope: Corout
                                 navigationRequest = navigationRequest.acknowledge(next)
                                 pendingTabOrder=pendingTabOrder?.keepFor(next)
                                 pendingPaneOrder=pendingPaneOrder?.keepFor(next)
+                                clipboardDelivery.deliver(next,visible && foreground && !navigationRequest.pending)
                                 val old=state.value
                                 if(old.selectedSession!=next.selectedSession) presentation.flush()
                                 if(old.connectionEpoch!=next.connectionEpoch) {
@@ -217,6 +230,7 @@ internal class RexConnection(application: Application, private val scope: Corout
                                 if(!next.controlled || old.selectedBlock!=next.selectedBlock) resetModifiers()
                                 publishActivityState(next)
                                 queueDisplay(next)
+                                hasSemanticPrompts=next.screen?.hasSemanticPrompt==true
                                 hasScreen=next.screen!=null
                                 screenDimensions=next.screen?.let {it.columns to it.rows}
 
@@ -475,6 +489,12 @@ internal class RexConnection(application: Application, private val scope: Corout
         val input = TerminalInput.modified(text, controlModifier, altModifier, shiftModifier)
         controlModifier = false; altModifier = false;shiftState=shiftState.consume();keyboardRequest=""
         command("input", "text" to input,"session" to state.value.selectedSession,"block" to state.value.selectedBlock,"navigationId" to state.value.navigationId,"connectionEpoch" to state.value.connectionEpoch)
+    }
+    fun scrollPrompt(direction: Int) {
+        val current=state.value
+        if(visible && foreground && !navigationRequest.pending && current.screen!=null) command("scroll_prompt",
+            "session" to current.selectedSession,"block" to current.selectedBlock,"navigationId" to current.navigationId,
+            "connectionEpoch" to current.connectionEpoch,"direction" to direction.coerceIn(-1,1))
     }
     fun scroll(lines: Int) {if(!navigationRequest.pending && state.value.screen!=null) command("scroll","block" to state.value.selectedBlock,"lines" to lines)}
     fun scrollToBottom() {if(!navigationRequest.pending && state.value.screen!=null) command("scroll","block" to state.value.selectedBlock,"bottom" to true)}

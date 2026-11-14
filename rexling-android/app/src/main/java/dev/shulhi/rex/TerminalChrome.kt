@@ -359,7 +359,7 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable internal fun TerminalTabs(windows: List<WindowItem>,selectedId: String,enabled: Boolean,
-    onSelect: (String)->Unit,panePrograms: (WindowItem)->List<ProgramIdentity>,selectedPane: (WindowItem)->Int,paneTitle: (WindowItem,Int)->String={_,_->""},paneWorking: (WindowItem)->Boolean={false},onClose: (WindowItem)->Unit={},onMove: (String,String?)->Boolean={_,_->false},reorderKey: String="",animateWorking: Boolean=true,contentReady: Boolean=true,actions: @Composable ()->Unit) {
+    onSelect: (String)->Unit,panePrograms: (WindowItem)->List<ProgramIdentity>,selectedPane: (WindowItem)->Int,paneTitle: (WindowItem,Int)->String={_,_->""},paneWorking: (WindowItem)->Boolean={false},onClose: (WindowItem)->Unit={},onMove: (String,String?)->Boolean={_,_->false},reorderKey: String="",animateWorking: Boolean=true,contentReady: Boolean=true,paneProgress: (WindowItem)->TerminalProgress?={null},actions: @Composable ()->Unit) {
     var revealed by remember(reorderKey) {mutableStateOf(false)}
     LaunchedEffect(reorderKey,contentReady) {if(contentReady) revealed=true}
     if(!contentReady && !revealed) {
@@ -456,9 +456,10 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
                     val allocation=widths[windowIndex]
                     val width=allocation.width.dp
                     val showTitle=allocation.showTitle
-                    val indicatorColor=MaterialTheme.colorScheme.primary
-                    val busy=paneWorking(w)
-                    val workPhase=rememberWorkingPhase(active && busy && animateWorking)
+                    val progress=paneProgress(w)
+                    val indicatorColor=terminalProgressColor(progress)
+                    val busy=paneWorking(w) || progress?.busy==true
+                    val workPhase=rememberWorkingPhase(animateWorking && if(progress!=null) progress.busy && progress.percent==null else active && busy)
                     val programs=panePrograms(w)
                     val pane=selectedPane(w)
                     val program=programs.getOrNull(pane) ?: ProgramIdentity.Loading
@@ -469,14 +470,18 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
                     Column(Modifier.height(45.dp).width(width)
                         .drawWithContent {
                             drawContent()
-                            if(active) {
+                            if(active || progress!=null) {
                                 val origin=Offset(0f,size.height-2.dp.toPx());val bar=Size(size.width,2.dp.toPx())
-                                drawWorkingBar(indicatorColor,origin,bar,phase=if(busy && animateWorking) workPhase.value else null)
+                                if(progress!=null) {
+                                    drawWorkingBar(indicatorColor.copy(alpha=.18f),origin,bar)
+                                    val fill=progress.percent?.let {bar.copy(width=bar.width*it/100f)} ?: bar
+                                    drawWorkingBar(indicatorColor,origin,fill,phase=if(progress.busy && progress.percent==null && animateWorking) workPhase.value else null)
+                                } else drawWorkingBar(indicatorColor,origin,bar,phase=if(busy && animateWorking) workPhase.value else null)
                             }
                         }
                         .clip(RoundedCornerShape(16.dp))
                         .background(if(drag.id==w.id && drag.moved) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-                        .semantics(mergeDescendants=true) {contentDescription="Tab $title, ${program.label}"+(if(busy) ", working" else "")}
+                        .semantics(mergeDescendants=true) {contentDescription="Tab $title, ${program.label}"+(progress?.let {", ${it.description}"} ?: if(busy) ", working" else "")}
                         .semantics {
                             selected=active
                             if(enabled) {
@@ -530,7 +535,7 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
 }
 
 @Composable internal fun KeyboardBar(controlled: Boolean,enabled: Boolean,control: Boolean,alt: Boolean,shift: Boolean,
-    keyboardVisible: Boolean,onControl: ()->Unit,onAlt: ()->Unit,onShift: ()->Unit,onShiftPress: ()->Unit,onShiftRelease: (Boolean)->Unit,onKey: (String)->Unit,readable: Boolean=enabled,onControlShortcut: (String)->Unit={},inputKey: String="",shortcutGesture: ControlShortcutGesture=ControlShortcutGesture.HOLD,arrowJoystickEnabled: Boolean=true,onPaste: (() ->Unit)?=null,onKeyboard: ()->Unit) {
+    keyboardVisible: Boolean,onControl: ()->Unit,onAlt: ()->Unit,onShift: ()->Unit,onShiftPress: ()->Unit,onShiftRelease: (Boolean)->Unit,onKey: (String)->Unit,readable: Boolean=enabled,onControlShortcut: (String)->Unit={},inputKey: String="",shortcutGesture: ControlShortcutGesture=ControlShortcutGesture.HOLD,arrowJoystickEnabled: Boolean=true,onPaste: (() ->Unit)?=null,onPrompt: ((Int)->Unit)?=null,onKeyboard: ()->Unit) {
     var expanded by remember {mutableStateOf(false)}
     // The extra-key trigger lives just before Esc, outside the initial viewport.
     val keyScroll=rememberScrollState(initial=Int.MAX_VALUE)
@@ -557,7 +562,7 @@ internal val MonoUi = FontFamily(Font(R.font.jetbrains_mono_regular),Font(R.font
                         DockKey("alt",controlled,alt,description="Alt",modifier=Modifier.weight(1f),icon=ChromeIcon.ALT,readable=readable,onClick=onAlt)
                         ShiftDockKey(controlled,shift,Modifier.weight(1f),onShift,onShiftPress,onShiftRelease,readable=readable)
                         DockKey("tab",controlled,description="Tab key",modifier=Modifier.weight(1f),icon=ChromeIcon.TAB,readable=readable) {onKey("tab")}
-                        ArrowJoystickDockKey(controlled,Modifier.weight(1f),onKey,readable,inputKey,keyboardVisible,arrowJoystickEnabled)
+                        ArrowJoystickDockKey(controlled,Modifier.weight(1f),onKey,readable,inputKey,keyboardVisible,arrowJoystickEnabled,onPrompt)
                         DockKey("enter",controlled,description="Enter",modifier=Modifier.weight(1f),icon=ChromeIcon.ENTER,readable=readable) {onKey("enter")}
                     }
                 }

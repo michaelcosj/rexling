@@ -1,0 +1,25 @@
+{
+  "build": 122,
+  "feature": "OSC 9;4 canonical server progress reports",
+  "native_tests_passed": 108,
+  "android_unit_tests": 177,
+  "android_unit_tests_skipped": 1,
+  "phone_ui_tests_passed": 11,
+  "phone_model": "SM-S906E",
+  "lint_release": "passed",
+  "apk_verification": "passed",
+  "screenshots_reviewed": [
+    "progress-tab-light.png",
+    "progress-activity-dark.png"
+  ],
+  "coverage": [
+    "all progress states, percentage validation and coalescing",
+    "background pane server events",
+    "clear on remove and recovery",
+    "OSC 7501 state/percentage precedence",
+    "progress-only records excluded from notifications and unread dots",
+    "tab and Activity rendering",
+    "existing Activity selection and attention behavior"
+  ],
+  "live_program_emission": "not executed by the automated tests; demo-progress.sh provided"
+}

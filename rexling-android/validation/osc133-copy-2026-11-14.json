@@ -1,0 +1,19 @@
+{
+  "build": 121,
+  "native_tests_passed": 105,
+  "android_unit_tests": 174,
+  "android_unit_tests_skipped": 1,
+  "phone_selection_clipboard_tests_passed": 7,
+  "phone_model": "SM-S906E",
+  "lint_release": "passed",
+  "coverage": [
+    "copy command without primary/continuation prompts",
+    "unwrap soft-wrapped commands",
+    "multiline Unicode command and output",
+    "output beyond viewport",
+    "snapshot restoration during running command",
+    "reject stale target or changed viewport",
+    "offline clipboard delivery",
+    "existing Copy/Paste and hyperlink actions"
+  ]
+}

@@ -209,6 +209,9 @@ struct Actor {
     identity: String,
     error: String,
     notice: String,
+    progress_reports: BTreeMap<String,Value>,
+    clipboard_serial: u64,
+    clipboard: Value,
     sessions: Value,
     windows: Value,
     screen: Option<Arc<Frame>>,
@@ -272,6 +275,8 @@ impl Actor {
             identity: String::new(),
             error: String::new(),
             notice: String::new(),
+            progress_reports:BTreeMap::new(),
+            clipboard_serial: 0,clipboard: Value::Null,
             sessions: json!([]),
             windows: json!([]),
             screen: None,
@@ -305,14 +310,22 @@ impl Actor {
         }
     }
     fn publish(&mut self) {
-        if self.activity_dirty {self.activity_snapshot=Arc::new(self.activity.clone());self.activity_dirty=false;}
+        if self.activity_dirty {
+            let mut items=crate::progress::activity(&self.activity,&self.activity_panes,&self.progress_reports);
+            for item in items.as_array_mut().into_iter().flatten().filter(|v|v["progressOnly"]==true && v["session"]==self.selected_session) {
+                let id=item["block"].as_str().unwrap_or("").to_owned();
+                if let Some(app)=self.programs[&id].as_array().and_then(|v|v.first()).and_then(Value::as_str) {item["app"]=json!(app);}
+                if let Some(title)=self.titles[&id].as_str().filter(|v|!v.is_empty()) {item["title"]=json!(title);}
+            }
+            self.activity_snapshot=Arc::new(items);self.activity_dirty=false;
+        }
         if let Ok(mut shared) = self.shared.lock() {
             shared.activity=self.activity_snapshot.clone();
             shared.revision += 1;
             shared.frame=self.screen.clone();
             shared.key=format!("{}:{}",self.selected_session,self.selected_block);
             shared.json=json!({"phase":self.phase,"endpoint":self.server,
-                "identity":self.identity,"error":self.error,"notice":self.notice,"sessions":self.sessions,
+                "terminalProgress":crate::progress::selected(&self.progress_reports,&self.selected_session),"identity":self.identity,"error":self.error,"notice":self.notice,"clipboard":self.clipboard,"sessions":self.sessions,
                 "windows":self.windows,"selectedSession":self.selected_session,
                 "selectedBlock":self.selected_block,"navigationId":self.navigation_id,"tabMoveId":self.tab_move_id,"paneMoveId":self.pane_move_id,"connectionEpoch":self.connection_epoch,"otherOwner":self.other_owner,"controlled":self.controlled,"creating":self.creating,"sessionDetails":self.session_details,"programs":self.programs,"directories":self.directories,"titles":self.titles,"working":self.working,"activityError":self.activity_error,"activityPartial":self.activity_partial,"activityLoading":(self.activity_open || self.monitoring) && (self.activity_task.is_some() || self.activity_full),"attentionCount":self.attention_count}).to_string();
             shared
@@ -522,6 +535,7 @@ impl Actor {
         self.controlled = false;
     }
     fn lose_connections(&mut self) {
+        self.progress_reports.clear();self.activity_dirty=true;
         self.commands.clear();self.input_acks.clear();
         self.connect_task=None;self.other_owner=false;
         self.preview_task = None;
@@ -661,6 +675,10 @@ impl Actor {
             self.program_refresh = tokio::time::Instant::now();
         }
         self.windows = next;
+        let live: BTreeSet<_>=self.windows.as_array().into_iter().flatten().flat_map(|w|w["blocks"].as_array().into_iter().flatten()).filter_map(|b|b["id"].as_str().map(str::to_owned)).collect();
+        let before=self.progress_reports.len();
+        self.progress_reports.retain(|_,r|r["session"]!=self.selected_session || r["block"].as_str().is_some_and(|id|live.contains(id)));
+        if self.progress_reports.len()!=before {self.activity_dirty=true;}
         if !self.selected_block.is_empty() && !selected_exists {
             self.data = None;
             self.data_resume = None;
@@ -686,6 +704,7 @@ impl Actor {
         Ok(())
     }
     fn apply_program_details(&mut self, details: Value) {
+        if !self.progress_reports.is_empty() {self.activity_dirty=true;}
         self.programs=details["programs"].clone();self.directories=details["directories"].clone();
         self.titles=details["titles"].clone();self.working=details["working"].clone();
         self.title_owners=details["owners"].clone();
@@ -702,8 +721,10 @@ impl Actor {
         if !self.windows.as_array().into_iter().flatten().any(|w|
             w["blocks"].as_array().into_iter().flatten().any(|b|b["id"]==id)) {return;}
         match name {
+            "progress_report" => {if crate::progress::update(&mut self.progress_reports,&self.selected_session,id,payload) {self.activity_dirty=true;}},
             "process_changed" => {
                 let owner=json!({"pid":payload["foreground"]["pid"],"name":payload["foreground"]["name"]});
+                if !same_process(&self.title_owners[id],&owner) && self.progress_reports.remove(&crate::activity::pane_key(&self.selected_session,id)).is_some() {self.activity_dirty=true;}
                 self.title_owners[id]=owner.clone();self.process_events.insert(id.into(),owner);
                 if self.title_events.get(id).is_some_and(|event|!same_process(&self.title_owners[id],&event["owner"])) {
                     self.title_events.remove(id);self.titles[id]=json!("");
@@ -711,12 +732,14 @@ impl Actor {
                 self.program_refresh=tokio::time::Instant::now();
             }
             "title_changed" => {
+                if self.progress_reports.contains_key(&crate::activity::pane_key(&self.selected_session,id)) {self.activity_dirty=true;}
                 if self.title_owners[id]["pid"].is_number() && !same_process(&self.title_owners[id],&payload["owner"]) {return;}
                 self.title_events.insert(id.into(),payload.clone());
                 if same_process(&self.title_owners[id],&payload["owner"]) {self.titles[id]=json!(display_title(payload));}
                 if crate::activity::apply_title(&mut self.activity,&self.selected_session,id,payload) {self.activity_dirty=true;}
             }
-            "program_status_changed" | "program_status_removed" | "child_exited" => self.program_refresh=tokio::time::Instant::now(),
+            "child_exited" => {if self.progress_reports.remove(&crate::activity::pane_key(&self.selected_session,id)).is_some() {self.activity_dirty=true;}self.program_refresh=tokio::time::Instant::now();},
+            "program_status_changed" | "program_status_removed" => self.program_refresh=tokio::time::Instant::now(),
             _=>()
         }
     }
@@ -757,6 +780,11 @@ impl Actor {
             if inner["type"]=="block_event" {
                 let block=&inner["payload"];let sid=event["payload"]["session_id"].as_str().unwrap_or("");
                 if block["creator_name"]=="com.superlogical.terminal" && let (Some(id),Some(name))=(block["block_id"].as_str(),block["name"].as_str()) {
+                    if name=="progress_report" {
+                        if crate::progress::update(&mut self.progress_reports,sid,id,&block["payload"]) {self.activity_dirty=true;self.publish();}
+                        return Ok(());
+                    }
+                    if (name=="child_exited" || (name=="process_changed" && sid!=self.selected_session)) && self.progress_reports.remove(&crate::activity::pane_key(sid,id)).is_some() {self.activity_dirty=true;self.publish();}
                     if matches!(name,"program_status_changed"|"program_status_removed"|"process_changed"|"child_exited") {
                         let key=crate::activity::pane_key(sid,id);
                         if self.activity_panes.as_array().into_iter().flatten().any(|p|
@@ -791,7 +819,12 @@ impl Actor {
             return;
         };
         let events: Vec<_>=replica.events.drain(..).collect();
-        let changed=!events.is_empty();
+        let clipboard=replica.clipboard_write.take();
+        let changed=!events.is_empty() || clipboard.is_some();
+        if let Some(text)=clipboard {
+            self.clipboard_serial+=1;
+            self.clipboard=json!({"serial":self.clipboard_serial,"text":text,"block":self.selected_block,"connection":self.connection_epoch,"navigation":self.navigation_id});
+        }
         for event in events {
             // Data and control streams have independent delivery order. Resize APCs
             // still update the grid in Replica, but cannot override canonical ownership.
@@ -1298,6 +1331,34 @@ impl Actor {
                 }
                 if let Err(error)=self.control.as_mut().context("not connected")?.terminal(&self.selected_session,&self.selected_block,"write",json!({"data":text})).await {
                     self.recover(error);self.notice="Scroll outcome uncertain; wheel input was not resent".into();self.publish();
+                }
+            }
+            "copy_semantic" => {
+                if !self.visible || self.paused || !self.input_target().matches(&value) {return Ok(());}
+                let Some(replica)=self.replica.as_mut().filter(|r|r.ready()) else{return Ok(());};
+                let terminal=replica.terminal()?;let frame=terminal.frame()?;
+                ensure!(value["columns"].as_u64()==Some(frame.columns as u64) && value["rows"].as_u64()==Some(frame.rows as u64) &&
+                    value["scrollTotal"].as_u64()==Some(frame.scroll_total) && value["scrollOffset"].as_u64()==Some(frame.scroll_offset) &&
+                    value["viewport"].as_str()==Some(frame.text().as_str()),"Terminal changed. Select the text again.");
+                let col=u16::try_from(value["col"].as_u64().context("selection column missing")?)?;
+                let row=u16::try_from(value["row"].as_u64().context("selection row missing")?)?;
+                ensure!(col<frame.columns && row<frame.rows,"Selection is outside the terminal");
+                let text=terminal.command_text(col,row,value["output"]==true)?;
+                if let Some(text)=text.filter(|text|!text.is_empty()) {
+                    self.clipboard_serial+=1;
+                    self.clipboard=json!({"serial":self.clipboard_serial,"text":text,"block":self.selected_block,
+                        "connection":self.connection_epoch,"navigation":self.navigation_id,"local":true});
+                } else {self.notice="Command boundaries are not available for this selection".into();}
+                self.publish();
+            }
+            "scroll_prompt" => {
+                if !self.visible || self.paused || value["block"].as_str()!=Some(self.selected_block.as_str()) ||
+                    value["session"].as_str()!=Some(self.selected_session.as_str()) ||
+                    value["navigationId"].as_u64()!=Some(self.navigation_id) ||
+                    value["connectionEpoch"].as_u64()!=Some(self.connection_epoch) {return Ok(());}
+                if let Some(replica)=self.replica.as_mut().filter(|r|r.ready()) {
+                    replica.terminal()?.scroll_prompts(value["direction"].as_i64().unwrap_or(0).clamp(-1,1) as i32);
+                    self.dirty=true;
                 }
             }
             "scroll" => {
@@ -2860,6 +2921,73 @@ while True:
             runtime.block_on(actor.command(json!({"type":kind,"session":"s","block":"b","navigationId":2,"columns":40,"rows":30}))).unwrap();
             actor.paused=false;
         }
+    }
+
+    #[test] fn server_progress_events_update_background_tabs_and_activity_and_clear_on_recovery() {
+        let shared=Arc::new(Mutex::new(Shared{revision:0,json:String::new(),pending_previews:BTreeMap::new(),frame:None,key:String::new(),wire:crate::updates::WireBase::default(),activity:Arc::default()}));
+        let mut actor=Actor::new(shared.clone(),Arc::new(crate::updates::Updates::default()));
+        actor.selected_session="s".into();actor.windows=json!([{"blocks":[{"id":"a"},{"id":"b"}]}]);
+        actor.activity_panes=json!([{"session":{"session_id":"s","label":"Session"},"window":{"window_id":"w","label":"Tab"},"block":{"block_id":"b","label":"cargo"}}]);
+        let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let event=|state:&str,percent:Value|json!({"payload":{"type":"session_event","payload":{"session_id":"s","event":{"type":"block_event","payload":{"creator_name":"com.superlogical.terminal","block_id":"b","name":"progress_report","payload":{"state":state,"progress":percent}}}}}});
+        runtime.block_on(actor.event(event("set",json!(40)))).unwrap();
+        let state:Value=serde_json::from_str(&shared.lock().unwrap().json).unwrap();assert_eq!(state["terminalProgress"]["b"]["progress"],40);
+        assert_eq!(shared.lock().unwrap().activity[0]["progressOnly"],true);
+        runtime.block_on(actor.event(event("remove",Value::Null))).unwrap();assert!(actor.progress_reports.is_empty());assert_eq!(shared.lock().unwrap().activity.as_ref(),&json!([]));
+        runtime.block_on(actor.event(event("indeterminate",Value::Null))).unwrap();actor.lose_connections();actor.publish();
+        assert!(actor.progress_reports.is_empty());assert_eq!(shared.lock().unwrap().activity.as_ref(),&json!([]));
+    }
+
+    #[test] fn semantic_copy_is_local_and_uses_the_frozen_viewport_and_target() {
+        let shared=Arc::new(Mutex::new(Shared{revision:0,json:String::new(),pending_previews:BTreeMap::new(),frame:None,key:String::new(),wire:crate::updates::WireBase::default(),activity:Arc::default()}));
+        let mut actor=Actor::new(shared,Arc::new(crate::updates::Updates::default()));
+        actor.visible=true;actor.paused=false;actor.phase="reconnecting".into();actor.selected_session="s".into();actor.selected_block="b".into();actor.connection_epoch=2;actor.navigation_id=3;
+        let mut terminal=rex_core::ghostty::Terminal::new(30,4).unwrap();
+        terminal.write(b"\x1b]133;A\x07$ \x1b]133;B\x07echo hello\x1b]133;C\x07\r\nhello\r\n\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07").unwrap();
+        let mut replica=Replica::new(42);replica.feed(&terminal.encode().unwrap()).unwrap();
+        let frame=replica.terminal().unwrap().frame().unwrap();actor.replica=Some(replica);
+        let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let mut command=json!({"type":"copy_semantic","session":"s","block":"b","connectionEpoch":2,"navigationId":3,
+            "columns":frame.columns,"rows":frame.rows,"scrollTotal":frame.scroll_total,"scrollOffset":frame.scroll_offset,"viewport":frame.text(),"col":0,"row":1,"output":false});
+        runtime.block_on(actor.command(command.clone())).unwrap();assert_eq!(actor.clipboard["text"],"echo hello");assert_eq!(actor.clipboard["local"],true);
+        command["output"]=json!(true);runtime.block_on(actor.command(command.clone())).unwrap();assert_eq!(actor.clipboard["text"],"hello");
+        let clipboard=actor.clipboard.clone();
+        let mut stale=command.clone();stale["block"]=json!("other");runtime.block_on(actor.command(stale)).unwrap();assert_eq!(actor.clipboard,clipboard);
+        command["viewport"]=json!("changed");assert!(runtime.block_on(actor.command(command)).unwrap_err().to_string().contains("Select the text again"));
+        assert_eq!(actor.clipboard,clipboard);assert!(actor.control.is_none());assert!(!actor.controlled);
+    }
+
+    #[test] fn prompt_navigation_is_local_and_rejects_stale_targets_while_disconnected() {
+        let shared=Arc::new(Mutex::new(Shared{revision:0,json:String::new(),pending_previews:BTreeMap::new(),frame:None,key:String::new(),wire:crate::updates::WireBase::default(),activity:Arc::default()}));
+        let mut actor=Actor::new(shared,Arc::new(crate::updates::Updates::default()));
+        actor.visible=true;actor.paused=false;actor.phase="preview".into();actor.selected_session="s".into();actor.selected_block="b".into();actor.connection_epoch=2;actor.navigation_id=3;
+        let mut terminal=rex_core::ghostty::Terminal::new(30,4).unwrap();
+        for i in 0..8 {terminal.write(format!("\x1b]133;A\x07$ \x1b]133;B\x07command_{i}\x1b]133;C\x07\r\noutput\r\n\x1b]133;D;0\x07").as_bytes()).unwrap();}
+        let bottom=terminal.frame().unwrap().scroll_offset;
+        let mut replica=Replica::new(42);replica.feed(&terminal.encode().unwrap()).unwrap();actor.replica=Some(replica);
+        let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let command=json!({"type":"scroll_prompt","session":"s","block":"b","connectionEpoch":2,"navigationId":3,"direction":-1});
+        for (key,wrong) in [("session",json!("old")),("block",json!("old")),("connectionEpoch",json!(1)),("navigationId",json!(1))] {
+            let mut stale=command.clone();stale[key]=wrong;runtime.block_on(actor.command(stale)).unwrap();
+            assert_eq!(actor.replica.as_mut().unwrap().terminal().unwrap().frame().unwrap().scroll_offset,bottom);
+        }
+        runtime.block_on(actor.command(command)).unwrap();
+        assert!(actor.replica.as_mut().unwrap().terminal().unwrap().frame().unwrap().scroll_offset<bottom);
+        assert!(actor.control.is_none());assert!(!actor.controlled);
+    }
+
+    #[test] fn osc52_updates_publish_once_with_the_source_pane_and_epoch() {
+        let shared=Arc::new(Mutex::new(Shared{revision:0,json:String::new(),pending_previews:BTreeMap::new(),frame:None,key:String::new(),wire:crate::updates::WireBase::default(),activity:Arc::default()}));
+        let mut actor=Actor::new(shared.clone(),Arc::new(crate::updates::Updates::default()));
+        actor.selected_block="pane-a".into();actor.connection_epoch=2;actor.navigation_id=3;
+        let mut terminal=rex_core::ghostty::Terminal::new(30,6).unwrap();let mut replica=Replica::new(42);
+        replica.feed(&terminal.encode().unwrap()).unwrap();replica.feed(b"\x1b]52;c;aGVsbG8=\x07").unwrap();
+        actor.replica=Some(replica);actor.update_apcs();
+        let published:Value=serde_json::from_str(&shared.lock().unwrap().json).unwrap();
+        assert_eq!(published["clipboard"],json!({"serial":1,"text":"hello","block":"pane-a","connection":2,"navigation":3}));
+        let revision=shared.lock().unwrap().revision;actor.update_apcs();assert_eq!(shared.lock().unwrap().revision,revision);
+        actor.replica.as_mut().unwrap().feed(b"\x1b]52;c;dHdv\x07").unwrap();actor.update_apcs();
+        assert_eq!(actor.clipboard["serial"],2);assert_eq!(actor.clipboard["text"],"two");
     }
 
     #[test] fn delayed_resize_apcs_cannot_revoke_canonical_ownership() {

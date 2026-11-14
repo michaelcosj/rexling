@@ -1,0 +1,10 @@
+{
+  "feature": "OSC 52 remote clipboard writes",
+  "native_tests_passed": 97,
+  "android_unit_tests": 173,
+  "android_unit_tests_skipped": 1,
+  "android_clipboard_copy_paste_test": "passed on API 37 emulator",
+  "lint_release": "passed",
+  "phone_installation": "pending connection",
+  "remote_clipboard_reads": "disabled"
+}

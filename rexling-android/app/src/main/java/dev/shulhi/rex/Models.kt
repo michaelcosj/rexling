@@ -39,7 +39,10 @@ data class TerminalScreen(val columns: Int, val rows: Int, val cursorX: Int?, va
         }
     }
 }
+data class TerminalClipboardWrite(val serial: Long,val text: String,val block: String,val connection: Long,val navigation: Long,val local: Boolean=false)
+
 data class AppState(
+    val terminalProgress: Map<String,TerminalProgress> = emptyMap(),
     val programs: Map<String, ProgramIdentity> = emptyMap(),
     val workingBlocks: Set<String> = emptySet(),
     internal val activity: List<ActivityRecord> = emptyList(),
@@ -48,6 +51,7 @@ data class AppState(
     val directories: Map<String, String> = emptyMap(),
     val previewFrames: Map<String, TerminalScreen> = emptyMap(), val sessionDetails: Map<String, SessionDetail> = emptyMap(),
     val revision: Long = 0, val phase: String = "disconnected", val endpoint: String = "",
+    internal val clipboardWrite: TerminalClipboardWrite?=null,
     val identity: String = "", val error: String = "", val notice: String = "",
     val sessions: List<SessionItem> = emptyList(), val windows: List<WindowItem> = emptyList(),
     val selectedSession: String = "", val selectedBlock: String = "", val controlled: Boolean = false,
@@ -68,6 +72,7 @@ data class AppState(
                 directories = root.optJSONObject("directories")?.let { directories -> directories.keys().asSequence().associateWith { id ->
                     directories.optString(id).filterNot { it.isISOControl() || Character.getType(it)==Character.FORMAT.toInt() }.take(1024)
                 } } ?: emptyMap(),
+                terminalProgress=root.optJSONObject("terminalProgress")?.let {reports->reports.keys().asSequence().mapNotNull {id->TerminalProgress.parse(reports.optJSONObject(id))?.let {id to it}}.toMap()} ?: emptyMap(),
                 programs = root.optJSONObject("programs")?.let { programs -> programs.keys().asSequence().associateWith { id ->
                     ProgramIdentity.resolve(programs.optJSONArray(id).objects { it as String })
                 } } ?: emptyMap(),
@@ -75,6 +80,7 @@ data class AppState(
                 sessionDetails = root.optJSONObject("sessionDetails")?.let { details -> details.keys().asSequence().associateWith { key ->
                     val d=details.getJSONObject(key);SessionDetail(d.optString("attachment"),d.optInt("tabs"),d.optInt("panes")) } } ?: emptyMap(),
                 revision = root.optLong("revision"), navigationId = root.optLong("navigationId"),tabMoveId=root.optLong("tabMoveId"),paneMoveId=root.optLong("paneMoveId"),connectionEpoch=root.optLong("connectionEpoch"),otherOwner=root.optBoolean("otherOwner"),attentionCount=root.optInt("attentionCount").coerceIn(0,1024), phase = root.optString("phase", "disconnected"),
+                clipboardWrite=root.optJSONObject("clipboard")?.let {TerminalClipboardWrite(it.optLong("serial"),it.optString("text"),it.optString("block"),it.optLong("connection"),it.optLong("navigation"),it.optBoolean("local"))},
                 endpoint = root.optString("endpoint"), identity = root.optString("identity"),
                 error = root.optString("error"), notice = root.optString("notice"),
                 sessions = root.optJSONArray("sessions").objects { value ->

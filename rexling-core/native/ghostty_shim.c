@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef void (*ApcFn)(void *, const uint8_t *, size_t);
+typedef void (*ApcFn)(void *, uint8_t, const uint8_t *, size_t);
 typedef void (*CellFn)(void *, uint16_t, uint16_t, const uint32_t *, size_t,
                        const uint8_t *, const uint8_t *, uint32_t, uint8_t, const uint8_t *, size_t);
 typedef struct {
@@ -20,7 +20,7 @@ typedef struct {
   ApcFn callback;
   void *userdata;
   uint64_t render_hold_generation;
-  bool semantic_seen, semantic_accepting;
+  bool semantic_seen, semantic_accepting, semantic_scanned, semantic_metadata;
 } RpTerminal;
 
 void rp_free(RpTerminal *t) {
@@ -38,8 +38,22 @@ static void unknown(GhosttyTerminal terminal, void *userdata,
   if (sequence->tag == GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE_APC &&
       !sequence->value.apc.truncated && t->callback) {
     GhosttyString s = sequence->value.apc.content;
-    t->callback(t->userdata, (const uint8_t *)s.ptr, s.len);
+    t->callback(t->userdata, 0, (const uint8_t *)s.ptr, s.len);
   }
+}
+// libghostty decodes OSC 52; only bounded UTF-8 text is forwarded to Android.
+static void clipboard_write(GhosttyTerminal terminal,void *userdata,const GhosttyClipboardWrite *write) {
+  (void)terminal;RpTerminal *t=userdata;
+  GhosttyClipboardWriteReply reply={.result=GHOSTTY_CLIPBOARD_WRITE_RESULT_UNSUPPORTED};
+  for(size_t i=0;t->callback && i<write->contents_len;i++) {
+    const GhosttyClipboardContent *content=&write->contents[i];
+    if(content->mime.len==10 && memcmp(content->mime.ptr,"text/plain",10)==0 && content->data.len<=262144) {
+      t->callback(t->userdata,1,(const uint8_t *)content->data.ptr,content->data.len);
+      reply.result=GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS;break;
+    }
+  }
+  // Read callbacks are intentionally not registered: remote clipboard reads are denied.
+  write->reply(write,&reply);
 }
 static void semantic_prompt(GhosttyTerminal terminal,void *userdata,const GhosttyTerminalSemanticPrompt *event) {
   (void)terminal;
@@ -75,6 +89,7 @@ uint8_t *rp_graphics_alloc(const GhosttyAllocator *allocator,size_t len) {
 static int configure(RpTerminal *t) {
   size_t limit = 65536;
   int r = ghostty_terminal_set(t->terminal, GHOSTTY_TERMINAL_OPT_USERDATA, t);
+  if(r==0)r=ghostty_terminal_set(t->terminal,GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE,(const void *)clipboard_write);
   if(r==0)r=ghostty_terminal_set(t->terminal,GHOSTTY_TERMINAL_OPT_RENDER_HOLD,(const void *)render_hold);
   if(r==0)r=ghostty_terminal_set(t->terminal,GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT,(const void *)semantic_prompt);
   if (r == 0) r = ghostty_terminal_set(t->terminal,
@@ -184,6 +199,96 @@ int rp_text(RpTerminal *t, uint8_t **out, size_t *len) {
   ghostty_formatter_free(formatter);
   return r;
 }
+static int screen_ref(RpTerminal *t,uint16_t x,uint32_t y,GhosttyGridRef *ref) {
+  GhosttyPoint point={.tag=GHOSTTY_POINT_TAG_SCREEN,.value.coordinate={.x=x,.y=y}};
+  return ghostty_terminal_grid_ref(t->terminal,point,ref);
+}
+static int format_selection(RpTerminal *t,const GhosttySelection *selection,bool trim,uint8_t **out,size_t *len) {
+  GhosttyFormatter formatter=NULL;bool unwrap=true;
+  int r=ghostty_formatter_terminal_new(NULL,&formatter,t->terminal);
+  if(r==0)r=ghostty_formatter_set(formatter,GHOSTTY_FORMATTER_OPT_SELECTION,selection);
+  if(r==0)r=ghostty_formatter_set(formatter,GHOSTTY_FORMATTER_OPT_UNWRAP,&unwrap);
+  if(r==0)r=ghostty_formatter_set(formatter,GHOSTTY_FORMATTER_OPT_TRIM,&trim);
+  if(r==0)r=ghostty_formatter_format_alloc(formatter,NULL,out,len);
+  ghostty_formatter_free(formatter);return r;
+}
+static int append_command(uint8_t **buffer,size_t *size,const uint8_t *text,size_t len) {
+  if(len>262144-*size)return GHOSTTY_LIMIT_EXCEEDED;
+  if(!len)return 0;
+  uint8_t *next=realloc(*buffer,*size+len);if(!next)return GHOSTTY_OUT_OF_MEMORY;
+  memcpy(next+*size,text,len);*buffer=next;*size+=len;return 0;
+}
+// Selection derives from libghostty semantic cells, never from prompt-looking text.
+int rp_command_text(RpTerminal *t,uint16_t col,uint16_t row,int output,uint8_t **out,size_t *len) {
+  *out=NULL;*len=0;uint16_t cols=0;GhosttyTerminalScreen screen;
+  int r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN,&screen);
+  if(r!=0)return r;if(screen!=GHOSTTY_TERMINAL_SCREEN_PRIMARY)return GHOSTTY_NO_VALUE;
+  r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_COLS,&cols);if(r!=0)return r;
+  GhosttyPoint viewport={.tag=GHOSTTY_POINT_TAG_VIEWPORT,.value.coordinate={.x=col,.y=row}};
+  GhosttyGridRef ref={0};GhosttyPointCoordinate position={0};
+  r=ghostty_terminal_grid_ref(t->terminal,viewport,&ref);if(r!=0)return r;
+  r=ghostty_terminal_point_from_grid_ref(t->terminal,&ref,GHOSTTY_POINT_TAG_SCREEN,&position);if(r!=0)return r;
+  uint32_t start=position.y;bool found=false;
+  for(;;) {
+    GhosttyGridRef current={0};GhosttyRow raw=0;GhosttyRowSemanticPrompt kind;bool continuation=false;
+    r=screen_ref(t,0,start,&current);if(r!=0)return r;
+    r=ghostty_grid_ref_row(&current,&raw);if(r!=0)return r;
+    r=ghostty_row_get(raw,GHOSTTY_ROW_DATA_SEMANTIC_PROMPT,&kind);if(r!=0)return r;
+    r=ghostty_row_get(raw,GHOSTTY_ROW_DATA_WRAP_CONTINUATION,&continuation);if(r!=0)return r;
+    if(kind==GHOSTTY_ROW_SEMANTIC_PROMPT && !continuation) {found=true;break;}
+    if(start==0)break;start--;
+  }
+  if(!found)return GHOSTTY_NO_VALUE;
+  GhosttyTerminalScrollbar scrollbar={0};r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_SCROLLBAR,&scrollbar);if(r!=0)return r;
+  if(scrollbar.total>UINT32_MAX)return GHOSTTY_LIMIT_EXCEEDED;
+  uint8_t *buffer=NULL;size_t size=0;bool input_seen=false;
+  for(uint32_t y=start;y<scrollbar.total;y++) {
+    GhosttyGridRef current={0};GhosttyRow raw=0;GhosttyRowSemanticPrompt kind;bool continuation=false,wrap=false;
+    r=screen_ref(t,0,y,&current);if(r!=0)goto done;
+    r=ghostty_grid_ref_row(&current,&raw);if(r!=0)goto done;
+    r=ghostty_row_get(raw,GHOSTTY_ROW_DATA_SEMANTIC_PROMPT,&kind);if(r!=0)goto done;
+    r=ghostty_row_get(raw,GHOSTTY_ROW_DATA_WRAP_CONTINUATION,&continuation);if(r!=0)goto done;
+    r=ghostty_row_get(raw,GHOSTTY_ROW_DATA_WRAP,&wrap);if(r!=0)goto done;
+    if(y>start && kind==GHOSTTY_ROW_SEMANTIC_PROMPT && !continuation)break;
+    if(!output && y>start && kind==GHOSTTY_ROW_SEMANTIC_NONE && !continuation)break;
+    bool row_input=false;
+    for(uint16_t x=0;x<cols;x++) {
+      GhosttyCell cell=0;GhosttyCellSemanticContent semantic;uint32_t codepoint=0;
+      r=screen_ref(t,x,y,&current);if(r!=0)goto done;
+      r=ghostty_grid_ref_cell(&current,&cell);if(r!=0)goto done;
+      r=ghostty_cell_get(cell,GHOSTTY_CELL_DATA_SEMANTIC_CONTENT,&semantic);if(r!=0)goto done;
+      r=ghostty_cell_get(cell,GHOSTTY_CELL_DATA_CODEPOINT,&codepoint);if(r!=0)goto done;
+      if(output && semantic==GHOSTTY_CELL_SEMANTIC_OUTPUT && codepoint!=0) {
+        GhosttySelection selection={0};r=ghostty_terminal_select_output(t->terminal,&current,&selection);
+        if(r!=0)goto done;
+        r=format_selection(t,&selection,true,out,len);goto done;
+      }
+      if(output || semantic!=GHOSTTY_CELL_SEMANTIC_INPUT || codepoint==0)continue;
+      GhosttyTerminalSelectLineOptions options=GHOSTTY_INIT_SIZED(GhosttyTerminalSelectLineOptions);
+      options.ref=current;options.semantic_prompt_boundary=true;
+      GhosttySelection selection={0};r=ghostty_terminal_select_line(t->terminal,&options,&selection);if(r!=0)goto done;
+      // Restrict each span to this physical row; join soft wraps ourselves and omit continuation prompts.
+      GhosttyPointCoordinate first,last;
+      r=ghostty_terminal_point_from_grid_ref(t->terminal,&selection.start,GHOSTTY_POINT_TAG_SCREEN,&first);if(r!=0)goto done;
+      r=ghostty_terminal_point_from_grid_ref(t->terminal,&selection.end,GHOSTTY_POINT_TAG_SCREEN,&last);if(r!=0)goto done;
+      if(first.y<y) {r=screen_ref(t,0,y,&selection.start);if(r!=0)goto done;}
+      if(last.y>y) {r=screen_ref(t,cols-1,y,&selection.end);if(r!=0)goto done;last.x=cols-1;}
+      uint8_t *part=NULL;size_t part_len=0;r=format_selection(t,&selection,false,&part,&part_len);
+      if(r==0)r=append_command(&buffer,&size,part,part_len);
+      ghostty_free(NULL,part,part_len);if(r!=0)goto done;
+      input_seen=row_input=true;x=last.x;
+    }
+    if(!output && !wrap && (row_input || (input_seen && kind==GHOSTTY_ROW_SEMANTIC_PROMPT_CONTINUATION))) {
+      r=append_command(&buffer,&size,(const uint8_t *)"\n",1);if(r!=0)goto done;
+    }
+  }
+  if(output || !input_seen) {r=GHOSTTY_NO_VALUE;goto done;}
+  if(size && buffer[size-1]=='\n')size--;
+  if(size) { *out=ghostty_alloc(NULL,size);if(!*out) {r=GHOSTTY_OUT_OF_MEMORY;goto done;}memcpy(*out,buffer,size); }
+  *len=size;r=0;
+done:
+  free(buffer);return r;
+}
 int rp_encode(RpTerminal *t, uint8_t **out, size_t *len) {
   return ghostty_snapshot_encode_alloc(t->terminal, NULL, out, len);
 }
@@ -195,6 +300,10 @@ void rp_scroll(RpTerminal *t, int32_t lines, int bottom) {
   behavior.value.delta = lines;
   ghostty_terminal_scroll_viewport(t->terminal, behavior);
 }
+void rp_scroll_prompts(RpTerminal *t,int32_t prompts) {
+  GhosttyTerminalScrollViewport behavior={.tag=GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT,.value.delta_prompt=prompts};
+  ghostty_terminal_scroll_viewport(t->terminal,behavior);
+}
 int rp_input_flags(RpTerminal *t, uint8_t *flags) {
   bool mouse=false,at_prompt=false;
   GhosttyTerminalScreen screen=GHOSTTY_TERMINAL_SCREEN_PRIMARY;
@@ -205,7 +314,7 @@ int rp_input_flags(RpTerminal *t, uint8_t *flags) {
   if(r==0) r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_MODE,&cursor);
   if(r==0)r=ghostty_terminal_get(t->terminal,GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT,&at_prompt);
   bool accepting=at_prompt && (!t->semantic_seen || t->semantic_accepting);
-  bool known=screen==GHOSTTY_TERMINAL_SCREEN_PRIMARY && (t->semantic_seen || at_prompt);
+  bool known=screen==GHOSTTY_TERMINAL_SCREEN_PRIMARY && (t->semantic_seen || t->semantic_metadata || at_prompt);
   *flags=(accepting?16:0)|(known?32:0)|(mouse?1:0)|(screen==GHOSTTY_TERMINAL_SCREEN_ALTERNATE?2:0)|(alt.value?4:0)|(cursor.value?8:0);
   return r;
 }
@@ -270,8 +379,17 @@ int rp_frame(RpTerminal *t, RpFrame *frame, CellFn callback, void *userdata) {
   r=rp_input_flags(t,&frame->input_flags);if(r!=0)return r;
   frame->cursor_x=cursor.viewport_x; frame->cursor_y=cursor.viewport_y;
   frame->cursor_visible=cursor.visible && cursor.viewport_has_value;
+  // A restored terminal can have command boundaries while its cursor is in output.
+  if(!(frame->input_flags&2) && !t->semantic_scanned && !t->semantic_seen) {
+    t->semantic_scanned=true;
+    GhosttyPoint point={.tag=GHOSTTY_POINT_TAG_VIEWPORT,.value.coordinate={.x=0,.y=cursor.viewport_has_value?cursor.viewport_y:0}};
+    GhosttyGridRef ref={0};GhosttySelection output={0};
+    if(ghostty_terminal_grid_ref(t->terminal,point,&ref)==0 &&
+        ghostty_terminal_select_output(t->terminal,&ref,&output)==0)t->semantic_metadata=true;
+    if(t->semantic_metadata)frame->input_flags|=32;
+  }
   int input_start=-1,input_end=-1;
-  if((frame->input_flags&16) && frame->cursor_visible && scrollbar.offset+scrollbar.len>=scrollbar.total) {
+  if((frame->input_flags&16) && cursor.viewport_has_value && scrollbar.offset+scrollbar.len>=scrollbar.total) {
     input_start=input_end=cursor.viewport_y;
     for(int y=cursor.viewport_y;y>=0;y--) {
       GhosttyRowSemanticPrompt kind=GHOSTTY_ROW_SEMANTIC_NONE;bool continuation=false;

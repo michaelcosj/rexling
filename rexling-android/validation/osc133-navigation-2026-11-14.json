@@ -1,0 +1,19 @@
+{
+  "build": 120,
+  "native_tests_passed": 101,
+  "android_unit_tests": 173,
+  "android_unit_tests_skipped": 1,
+  "phone_tests_passed": 20,
+  "phone_model": "SM-S906E",
+  "lint_release": "passed",
+  "apk_verification": "passed",
+  "coverage": [
+    "prompt navigation after snapshot restoration",
+    "offline local navigation without control",
+    "stale session/block/navigation/epoch rejection",
+    "hidden cursor input hit regions",
+    "prompt redraw and reflow",
+    "popup navigation without terminal key emission",
+    "existing joystick and terminal mouse regression tests"
+  ]
+}

@@ -122,7 +122,7 @@ class BackgroundMonitorService: Service() {
             val current=records.firstOrNull {it.key==target.second.key}
             // A finished report may disappear immediately; keep its notification until seen.
             if(seen(monitor.profile,target.second) || (target.second.state!=ActivityState.DONE &&
-                ((current==null && complete) || (current!=null && (!current.state.notifiable || seen(monitor.profile,current)))))) cancel(key)
+                ((current==null && complete) || (current!=null && (!current.notifiable || seen(monitor.profile,current)))))) cancel(key)
         }}
         if(!background()) {clearAlerts();return}
         alerts.forEach {post(monitor.profile,it)}

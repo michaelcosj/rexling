@@ -9,7 +9,7 @@ use std::{
     rc::Rc,
 };
 
-type ApcFn = unsafe extern "C" fn(*mut c_void, *const u8, usize);
+type ApcFn = unsafe extern "C" fn(*mut c_void, u8, *const u8, usize);
 type CellFn =
     unsafe extern "C" fn(*mut c_void, u16, u16, *const u32, usize, *const u8, *const u8, u32, u8, *const u8, usize);
 #[repr(C)]
@@ -43,9 +43,11 @@ unsafe extern "C" {
     fn rp_color(term: *mut c_void, which: i32, rgb: *const u8) -> i32;
     fn rp_palette(term: *mut c_void, index: u8, rgb: *const u8) -> i32;
     fn rp_text(term: *mut c_void, out: *mut *mut u8, len: *mut usize) -> i32;
+    fn rp_command_text(term: *mut c_void,col:u16,row:u16,output:i32,out:*mut *mut u8,len:*mut usize)->i32;
     fn rp_encode(term: *mut c_void, out: *mut *mut u8, len: *mut usize) -> i32;
     fn rp_bytes_free(bytes: *mut u8, len: usize);
     fn rp_scroll(term: *mut c_void, lines: i32, bottom: i32);
+    fn rp_scroll_prompts(term: *mut c_void,prompts: i32);
     fn rp_input_flags(term: *mut c_void, flags: *mut u8) -> i32;
     fn rp_render_hold_state(term: *mut c_void,held: *mut u8,generation: *mut u64) -> i32;
     fn rp_wheel(term: *mut c_void, down: i32, col: i32, row: i32, cw: u32, ch: u32, out: *mut u8, capacity: usize, len: *mut usize) -> i32;
@@ -196,16 +198,18 @@ impl Terminal {
             offset,
         ))
     }
-    fn step(&mut self, bytes: &[u8]) -> Result<(usize, Vec<Vec<u8>>)> {
-        unsafe extern "C" fn apc(userdata: *mut c_void, bytes: *const u8, len: usize) {
+    fn step(&mut self, bytes: &[u8]) -> Result<(usize, Vec<(u8,Vec<u8>)>)> {
+        unsafe extern "C" fn apc(userdata: *mut c_void, kind: u8, bytes: *const u8, len: usize) {
             // Synchronous callback, borrowed bytes copied before native code returns.
             unsafe {
-                (&mut *userdata.cast::<Vec<Vec<u8>>>())
-                    .push(std::slice::from_raw_parts(bytes, len).to_vec());
+                let events=&mut *userdata.cast::<Vec<(u8,Vec<u8>)>>();
+                if kind==1 {events.retain(|(kind,_)|*kind!=1);}
+                let data=if len==0 {Vec::new()} else {std::slice::from_raw_parts(bytes,len).to_vec()};
+                events.push((kind,data));
             }
         }
         let mut consumed = 0;
-        let mut events = Vec::<Vec<u8>>::new();
+        let mut events = Vec::<(u8,Vec<u8>)>::new();
         check(
             unsafe {
                 rp_write(
@@ -214,7 +218,7 @@ impl Terminal {
                     bytes.len(),
                     &mut consumed,
                     apc,
-                    (&mut events as *mut Vec<Vec<u8>>).cast(),
+                    (&mut events as *mut Vec<(u8,Vec<u8>)>).cast(),
                 )
             },
             "write VT",
@@ -283,6 +287,21 @@ impl Terminal {
     }
     pub fn scroll_viewport(&mut self, lines: i32) {
         unsafe { rp_scroll(self.handle.as_ptr(), lines, 0) };
+    }
+    pub fn command_text(&mut self,col:u16,row:u16,output:bool)->Result<Option<String>> {
+        let mut bytes=ptr::null_mut();let mut len=0;
+        let code=unsafe {rp_command_text(self.handle.as_ptr(),col,row,output as i32,&mut bytes,&mut len)};
+        // GHOSTTY_NO_VALUE means this location has no matching command/output.
+        if code== -4 {return Ok(None);}
+        check(code,"select semantic command")?;
+        let data=if len==0 {Vec::new()} else {unsafe {std::slice::from_raw_parts(bytes,len)}.to_vec()};
+        unsafe {rp_bytes_free(bytes,len)};
+        let text=String::from_utf8(data)?;
+        ensure!(text.len()<=262144,"Command is too large to copy (256 KiB limit)");
+        Ok(Some(text))
+    }
+    pub fn scroll_prompts(&mut self,prompts: i32) {
+        unsafe {rp_scroll_prompts(self.handle.as_ptr(),prompts)};
     }
     pub fn scroll_to_bottom(&mut self) {
         unsafe { rp_scroll(self.handle.as_ptr(), 0, 1) };
@@ -428,6 +447,7 @@ pub struct Replica {
     terminal: Option<Terminal>,
     pub events: Vec<Value>,
     pub snapshot_bytes: usize,
+    pub clipboard_write: Option<String>,
 }
 impl Replica {
     pub fn new(nonce: u64) -> Self {
@@ -437,6 +457,7 @@ impl Replica {
             terminal: None,
             events: Vec::new(),
             snapshot_bytes: 0,
+            clipboard_write: None,
         }
     }
     pub fn ready(&self) -> bool {
@@ -465,7 +486,11 @@ impl Replica {
         while !bytes.is_empty() {
             let (n, apcs) = self.terminal()?.step(bytes)?;
             bytes = &bytes[n..];
-            for apc in apcs {
+            for (kind,apc) in apcs {
+                if kind==1 {
+                    if let Ok(text)=String::from_utf8(apc) {self.clipboard_write=Some(text);}
+                    continue;
+                }
                 let Ok(apc) = std::str::from_utf8(&apc) else {
                     continue;
                 };
@@ -501,6 +526,24 @@ impl Replica {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn osc52_delivers_decoded_text_only_from_live_writes() {
+        let mut terminal=Terminal::new(30,6).unwrap();
+        terminal.write(b"\x1b]52;c;b2xk\x07").unwrap();
+        let mut replica=Replica::new(42);replica.feed(&terminal.encode().unwrap()).unwrap();
+        assert!(replica.clipboard_write.is_none(),"snapshot must not repeat clipboard side effects");
+        for byte in b"\x1b]52;c;aGVsbG8K8J+mgA==\x1b\\" {replica.feed(&[*byte]).unwrap();}
+        assert_eq!(replica.clipboard_write.take().as_deref(),Some("hello\n🦀"));
+        replica.feed(b"\x1b]52;c;?\x07").unwrap();
+        assert!(replica.clipboard_write.is_none(),"read queries cannot become writes");
+        replica.feed(b"\x1b]52;c;!!!!\x07\x1b]52;c;/w==\x07").unwrap();
+        assert!(replica.clipboard_write.is_none(),"malformed base64 and non-UTF-8 are ignored");
+        replica.feed(b"\x1b]52;p;b25l\x07\x1b]52;c;dHdv\x07").unwrap();
+        assert_eq!(replica.clipboard_write.take().as_deref(),Some("two"));
+        let large=format!("\x1b]52;c;{}\x07","YWFh".repeat(90000));
+        replica.feed(large.as_bytes()).unwrap();assert!(replica.clipboard_write.is_none());
+        replica.feed(b"\x1b]52;c;b2s=\x07").unwrap();
+        assert_eq!(replica.clipboard_write.take().as_deref(),Some("ok"));
+    }
     fn input_rows(frame: &Frame) -> Vec<u16> {
         let mut rows=frame.cells.iter().filter(|c|c.attributes & (1<<30)!=0).map(|c|c.y).collect::<Vec<_>>();
         rows.sort();rows.dedup();rows
@@ -529,6 +572,63 @@ mod tests {
         t.write(b"\x1b]133;C\x07\r\n\x1b]133;D\x07\x1b]133;A\x07$ \x1b]133;I\x07x").unwrap();
         assert_eq!(input_rows(&t.frame().unwrap()),vec![3]);
         t.write(b"\r\noutput").unwrap();assert!(input_rows(&t.frame().unwrap()).is_empty());
+    }
+    #[test] fn semantic_copy_is_available_after_restoring_a_running_command() {
+        let mut t=Terminal::new(30,4).unwrap();
+        t.write(b"\x1b]133;A\x07$ \x1b]133;B\x07long-task\x1b]133;C\x07\r\none\r\ntwo\r\nthree\r\nfour\r\nfive").unwrap();
+        let (mut restored,_)=Terminal::decode(&t.encode().unwrap()).unwrap();
+        assert_eq!(restored.frame().unwrap().input_flags & 32,32);
+        assert_eq!(restored.command_text(0,1,false).unwrap().as_deref(),Some("long-task"));
+    }
+    #[test] fn semantic_copy_uses_command_boundaries_and_unwraps_long_commands() {
+        let mut t=Terminal::new(20,5).unwrap();
+        t.write(b"\x1b]133;A\x07project $ \x1b]133;B\x07echo abcdefghijklmnopqrstuvwxyz\x1b]133;C\x07\r\nfirst\r\nsecond\r\nthird\r\nfourth\r\nfifth\r\n\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07").unwrap();
+        t.scroll_viewport(-1000);
+        assert_eq!(t.command_text(10,0,false).unwrap().as_deref(),Some("echo abcdefghijklmnopqrstuvwxyz"));
+        assert_eq!(t.command_text(10,0,true).unwrap().as_deref(),Some("first\nsecond\nthird\nfourth\nfifth"));
+        assert_eq!(t.command_text(0,2,false).unwrap().as_deref(),Some("echo abcdefghijklmnopqrstuvwxyz"));
+        let (mut restored,_)=Terminal::decode(&t.encode().unwrap()).unwrap();restored.scroll_viewport(-1000);
+        assert_eq!(restored.command_text(0,2,true).unwrap().as_deref(),Some("first\nsecond\nthird\nfourth\nfifth"));
+    }
+    #[test] fn semantic_copy_omits_multiline_prompt_text_and_rejects_unmarked_apps() {
+        let mut t=Terminal::new(30,8).unwrap();
+        t.write("\x1b]133;A\x07$ \x1b]133;B\x07echo 'λ\r\n\x1b]133;P;k=c\x07> \x1b]133;B\x07🦀'\x1b]133;C\x07\r\nλ\r\n🦀\r\n\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07".as_bytes()).unwrap();
+        assert_eq!(t.command_text(0,2,false).unwrap().as_deref(),Some("echo 'λ\n🦀'"));
+        assert_eq!(t.command_text(0,2,true).unwrap().as_deref(),Some("λ\n🦀"));
+        t.write(b"\x1b[?1049hneovim").unwrap();assert!(t.command_text(0,0,true).unwrap().is_none());
+        let mut plain=Terminal::new(20,4).unwrap();plain.write(b"$ fake command\r\nfake output").unwrap();
+        assert!(plain.command_text(0,1,true).unwrap().is_none());
+    }
+    #[test] fn prompt_navigation_uses_retained_semantic_boundaries_after_restore() {
+        let mut t=Terminal::new(30,4).unwrap();
+        for command in 0..8 {
+            t.write(format!("\x1b]133;A\x07$ \x1b]133;B\x07command_{command}\x1b]133;C\x07\r\noutput_{command}\r\n\x1b]133;D;0\x07").as_bytes()).unwrap();
+        }
+        t.write(b"\x1b]133;A\x07$ \x1b]133;B\x07").unwrap();
+        let (mut restored,_)=Terminal::decode(&t.encode().unwrap()).unwrap();
+        let bottom=restored.frame().unwrap().scroll_offset;
+        restored.scroll_prompts(-1);let previous=restored.frame().unwrap();
+        assert!(previous.scroll_offset<bottom);assert!(previous.text().starts_with("$ command_"));
+        restored.scroll_prompts(-1);let earlier=restored.frame().unwrap();assert!(earlier.scroll_offset<previous.scroll_offset);
+        restored.scroll_prompts(1);assert_eq!(restored.frame().unwrap().scroll_offset,previous.scroll_offset);
+        restored.write(b"\x1b[?1049hfullscreen").unwrap();restored.scroll_prompts(-1);
+        assert_eq!(restored.frame().unwrap().scroll_offset,0);
+        let mut plain=Terminal::new(20,4).unwrap();plain.write(b"a\r\nb\r\nc\r\nd\r\ne").unwrap();
+        let before=plain.frame().unwrap().scroll_offset;plain.scroll_prompts(-1);assert_eq!(plain.frame().unwrap().scroll_offset,before);
+    }
+    #[test] fn semantic_input_remains_tappable_when_the_program_hides_the_cursor() {
+        let mut t=Terminal::new(20,6).unwrap();
+        t.write(b"\x1b]133;A\x07$ \x1b]133;B\x07hello\x1b[?25l").unwrap();
+        let frame=t.frame().unwrap();assert!(frame.cursor.is_none());
+        assert_eq!(input_rows(&frame),vec![0]);
+    }
+    #[test] fn semantic_input_survives_prompt_redraws_and_reflow() {
+        let mut t=Terminal::new(20,8).unwrap();
+        t.write(b"\x1b]133;A\x07$ \x1b]133;B\x07abcdefghijklmnop").unwrap();
+        t.resize(10,8,8,16).unwrap();assert_eq!(input_rows(&t.frame().unwrap()),vec![0,1]);
+        t.write(b"\r\x1b[1A\x1b]133;P;k=i\x07$ \x1b]133;B\x07redrawn\x1b[K").unwrap();
+        assert!(t.frame().unwrap().input_flags & 16!=0);
+        t.write(b"\x1b]133;C\x07").unwrap();assert!(input_rows(&t.frame().unwrap()).is_empty());
     }
     #[test] fn semantic_input_is_not_exposed_over_history() {
         let mut t=Terminal::new(20,4).unwrap();
