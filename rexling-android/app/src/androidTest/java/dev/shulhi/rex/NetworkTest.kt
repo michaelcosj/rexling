@@ -50,6 +50,28 @@ class NetworkTest {
             assertEquals(value.toString(),"connected",value.optString("phase"))
         } finally {NativeBridge.destroy(handle)}
     }
+    @Test fun routeCallbacksDoNotReplaceAnEstablishedRexConnection() {
+        val endpoint=InstrumentationRegistry.getArguments().getString("handoff_server")
+        org.junit.Assume.assumeTrue("Requires an explicitly owned disposable Rex server",endpoint!=null)
+        val handle=NativeBridge.create()
+        fun command(body: JSONObject) {assertEquals("",NativeBridge.command(handle,body.toString()))}
+        fun state(): JSONObject {val raw=NativeBridge.poll(handle,0);return if(raw.isBlank()) JSONObject() else JSONObject(raw)}
+        try {
+            command(JSONObject().put("type","connect").put("server",endpoint!!))
+            val deadline=System.currentTimeMillis()+10000
+            var current=state()
+            while(current.optString("phase")!="connected" && System.currentTimeMillis()<deadline) {Thread.sleep(50);current=state()}
+            assertEquals(current.toString(),"connected",current.optString("phase"))
+            val epoch=current.getLong("connectionEpoch")
+            for(online in listOf(false,true,true,false,true)) {
+                command(JSONObject().put("type","network").put("online",online).put("force",true))
+                Thread.sleep(150)
+                current=state()
+                assertEquals(current.toString(),"connected",current.optString("phase"))
+                assertEquals("Route changes must keep the same live socket session",epoch,current.getLong("connectionEpoch"))
+            }
+        } finally {NativeBridge.destroy(handle)}
+    }
     @Test fun privateKeysAreEncryptedInPreferences() = runBlocking {
         val endpoint="ssh://key-test@127.0.0.1:2222"
         val pair=java.security.KeyPairGenerator.getInstance("RSA").apply {initialize(2048)}.generateKeyPair()

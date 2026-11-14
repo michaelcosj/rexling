@@ -1,0 +1,25 @@
+{
+  "date": "2026-11-14",
+  "build": 115,
+  "findings": {
+    "phone_builtin_tailscale": "off, confirmed in Network preferences before any settings changes",
+    "phone_system_vpn": "active Tailscale VPN; Mac server identifies the client as shulhis-s22",
+    "mac_server": "Rex preview.19/API 14, Tailscale HTTPS available",
+    "client_bug": "network online=false or force=true called lose_connections even when the control/data sockets remained usable"
+  },
+  "change": "Retain established sockets, ownership, queued work and in-flight input across route callbacks. Reconnect after actual socket failure; wait for network availability before a replacement handshake. Explicit retry/disconnect still works.",
+  "validation": {
+    "native_workspace_passed": 90,
+    "native_optional_ignored": 18,
+    "unit_tests": "passed",
+    "release_lint": "passed",
+    "physical_device": "Samsung S22+; isolated renderbench test package",
+    "live_handoff_test": "Passed against a disposable Rex server: five offline/online/force callbacks preserved the same connectionEpoch",
+    "failure_recovery": "Native regression verifies a real I/O error enters reconnecting and waits until network returns"
+  },
+  "limits": [
+    "Does not make a broken TCP path migrate by itself; Tailscale/Android supplies route migration. Actual transport failure still requires reconnecting.",
+    "No live Wi-Fi/mobile-network switches were forced on the user phone.",
+    "Server logs alone do not prove that every reported MBP disconnection had this cause."
+  ]
+}

@@ -361,7 +361,9 @@ impl Actor {
                         continue;
                     }
                     if matches!(value["type"].as_str(),Some("connect"|"retry"|"network"|"resume"|"activity")) {maintenance_at=tokio::time::Instant::now();}
-                    if matches!(value["type"].as_str(),Some("monitor"|"connect"|"disconnect"|"pause"|"network"|"retry")) {
+                    if value["type"]=="network" {
+                        self.execute_command(value).await;
+                    } else if matches!(value["type"].as_str(),Some("monitor"|"connect"|"disconnect"|"pause"|"retry")) {
                         self.commands.clear();self.execute_command(value).await;
                     } else if let Err(error)=self.commands.push(value,&self.input_target()) {self.error=error.to_string();self.publish();}
 
@@ -904,8 +906,12 @@ impl Actor {
                 let network=value["type"]=="network";
                 if network {self.network_online=value["online"].as_bool().unwrap_or(true);}
                 if self.paused || self.endpoint.is_none() {return Ok(());}
-                let force=value["force"].as_bool().unwrap_or(false);
-                if network && self.network_online && self.phase=="connected" && !force {return Ok(());}
+                // Android's default route may briefly disappear or change underneath
+                // an established VPN/TCP socket. A route callback is not a socket
+                // failure: keep the existing channels, ownership and in-flight input.
+                // Actual I/O failure still goes through recover(); availability then
+                // controls when a replacement handshake can start.
+                if network && self.phase=="connected" {return Ok(());}
                 self.lose_connections();self.backoff=1;self.phase="reconnecting".into();
                 self.retry=self.network_online.then(tokio::time::Instant::now);self.error.clear();
                 self.notice=if self.network_online {"Reconnecting; input is paused"} else {"Waiting for network; input is paused"}.into();
@@ -2878,6 +2884,23 @@ while True:
         }
         let mut uncertain="Request outcome is uncertain; input was not resent".to_owned();
         clear_ownership_error(&mut uncertain);assert!(!uncertain.is_empty());
+    }
+
+    #[test] fn route_handoffs_preserve_live_connections_until_io_fails() {
+        let shared=Arc::new(Mutex::new(Shared {revision:0,json:String::new(),activity:Arc::default(),pending_previews:BTreeMap::new(),frame:None,key:String::new(),wire:crate::updates::WireBase::default()}));
+        let mut actor=Actor::new(shared,Arc::new(crate::updates::Updates::default()));
+        actor.endpoint=Some(Endpoint::new("https://example.invalid",Duration::from_secs(10)).unwrap());
+        actor.selected_session="s".into();actor.selected_block="b".into();actor.phase="connected".into();actor.controlled=true;actor.connection_epoch=7;
+        let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        for online in [false,true,true] {
+            runtime.block_on(actor.command(json!({"type":"network","online":online,"force":true}))).unwrap();
+            assert_eq!(actor.phase,"connected");assert!(actor.controlled);assert_eq!(actor.connection_epoch,7);assert!(actor.retry.is_none());
+        }
+        runtime.block_on(actor.command(json!({"type":"network","online":false}))).unwrap();
+        actor.recover(anyhow::anyhow!("actual socket failure"));
+        assert_eq!(actor.phase,"reconnecting");assert!(!actor.controlled);assert!(actor.retry.is_none());
+        runtime.block_on(actor.command(json!({"type":"network","online":true}))).unwrap();
+        assert!(actor.retry.is_some());assert_eq!(actor.selected_block,"b");
     }
 
     #[test] fn losing_network_cancels_a_pending_handshake_and_preserves_the_target() {
