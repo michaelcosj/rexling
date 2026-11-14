@@ -1,0 +1,25 @@
+{
+  "build": 125,
+  "lint_release": "passed",
+  "jvm": {
+    "tests": 177,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "phone_model": "SM-S906E",
+  "phone_input_tests_passed": 8,
+  "real_gboard_test_passed": 1,
+  "coverage": [
+    "Real installed Gboard key taps and suggestion candidate commit",
+    "Committed-word context retained across individual commitText calls",
+    "Correction of already committed known input without duplicate text",
+    "Nested edit batches return remaining nesting correctly",
+    "IME callback can pass through connection flush without recursive delivery",
+    "Existing dictation, Unicode editing, image input and stale-target rejection"
+  ],
+  "notes": [
+    "Live key taps wait until the keyboard opening animation finishes.",
+    "Neovim retains its existing no-suggestions setting for immediate command keys."
+  ]
+}

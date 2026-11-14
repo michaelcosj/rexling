@@ -29,6 +29,7 @@ class TerminalImageInputTest {
             val attrs=EditorInfo();val input=view.onCreateInputConnection(attrs)!!
             assertEquals(android.text.InputType.TYPE_TEXT_VARIATION_NORMAL,attrs.inputType and android.text.InputType.TYPE_MASK_VARIATION)
             assertEquals(0,attrs.inputType and android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+            assertTrue(attrs.inputType and android.text.InputType.TYPE_TEXT_FLAG_AUTO_CORRECT!=0)
             input.setComposingText("helo",1)
             input.setComposingText("hello",1)
             assertTrue(sent.isEmpty())
@@ -42,6 +43,79 @@ class TerminalImageInputTest {
             view.flushComposingText()
             input.finishComposingText()
             assertEquals(listOf("hello ","This is dictated text.","pending"),sent)
+        }
+    }
+    @Test fun editBatchesReportTheirRemainingNestingToAndroid() {
+        instrumentation.runOnMainSync {
+            val view=TerminalView(instrumentation.targetContext).apply {controlled=true}
+            val input=view.onCreateInputConnection(EditorInfo())!!
+            assertTrue(input.beginBatchEdit());assertTrue(input.beginBatchEdit())
+            input.setComposingText("hello",1)
+            assertTrue(input.endBatchEdit())
+            assertFalse("Gboard must be told that the final batch has ended",input.endBatchEdit())
+            assertFalse(input.endBatchEdit())
+        }
+    }
+    @Test fun gboardCanReplaceTheCurrentWordFromAMidwordCursor() {
+        instrumentation.runOnMainSync {
+            val sent=mutableListOf<String>();val view=TerminalView(instrumentation.targetContext).apply {controlled=true;onInput={sent+=it}}
+            val input=view.onCreateInputConnection(EditorInfo())!!
+            input.setComposingText("helo",1)
+            assertEquals("helo",input.getTextBeforeCursor(20,0).toString())
+            assertTrue(input.setSelection(2,2));assertEquals("he",input.getTextBeforeCursor(20,0).toString());assertEquals("lo",input.getTextAfterCursor(20,0).toString())
+            input.beginBatchEdit();input.setComposingRegion(0,4);input.commitText("hello ",1)
+            assertTrue("A correction batch must remain local until finalized",sent.isEmpty())
+            input.endBatchEdit();assertEquals(listOf("hello "),sent)
+            view.flushComposingText(restartIme=false)
+            input.setComposingText("helxo",1);input.setSelection(3,3)
+            input.beginBatchEdit();input.finishComposingText();input.deleteSurroundingText(3,2);input.commitText("hello",1);input.endBatchEdit()
+            assertEquals(listOf("hello ","hello"),sent)
+        }
+    }
+    @Test fun compositionBatchesKeepTheNextWordLocalAndDiscardStaleConnections() {
+        instrumentation.runOnMainSync {
+            val sent=mutableListOf<String>();var target="a"
+            val view=TerminalView(instrumentation.targetContext).apply {controlled=true;imageInputTarget={target};onInput={sent+=it}}
+            val input=view.onCreateInputConnection(EditorInfo())!!
+            input.setComposingText("helo",1);input.beginBatchEdit();input.commitText("hello ",1);input.setComposingText("world",1);input.endBatchEdit()
+            assertEquals(listOf("hello "),sent);assertEquals("hello world",input.getTextBeforeCursor(20,0).toString())
+            input.finishComposingText();assertEquals(listOf("hello ","world"),sent)
+            view.flushComposingText(restartIme=false);assertTrue(input.commitText("!",1));assertEquals("!",sent.last())
+            input.setComposingText("private",1);target="b"
+            assertFalse(input.commitText("wrong pane",1));assertFalse(input.deleteSurroundingText(1,0));assertEquals(listOf("hello ","world","!"),sent)
+        }
+    }
+    @Test fun compositionBackspaceAndCursorKeysStayLocalAndRespectUnicode() {
+        instrumentation.runOnMainSync {
+            val sent=mutableListOf<String>();val view=TerminalView(instrumentation.targetContext).apply {controlled=true;onInput={sent+=it}}
+            val input=view.onCreateInputConnection(EditorInfo())!!
+            input.setComposingText("a🦀b",1)
+            input.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_DPAD_LEFT))
+            assertEquals("a🦀",input.getTextBeforeCursor(20,0).toString())
+            input.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_DEL))
+            assertEquals("a",input.getTextBeforeCursor(20,0).toString());assertEquals("b",input.getTextAfterCursor(20,0).toString())
+            assertTrue(sent.isEmpty());input.finishComposingText();assertEquals(listOf("ab\u001b[D"),sent)
+        }
+    }
+    @Test fun committedWordRemainsAvailableForGboardCorrectionWithoutResendingIt() {
+        instrumentation.runOnMainSync {
+            val sent=mutableListOf<String>()
+            lateinit var view: TerminalView
+            view=TerminalView(instrumentation.targetContext).apply {
+                controlled=true;keyboardSuggestions=true
+                onInput={view.flushComposingText();sent+=it}
+            }
+            val input=view.onCreateInputConnection(EditorInfo())!!
+            input.commitText("h",1);input.commitText("e",1);input.commitText("l",1)
+            assertEquals("hel",input.getTextBeforeCursor(20,0).toString())
+            input.setComposingRegion(0,3);input.commitText("hello ",1)
+            assertEquals(listOf("h","e","l","lo "),sent)
+            input.finishComposingText();assertEquals(4,sent.size)
+            input.setComposingRegion(0,6);input.commitText("help ",1)
+            assertEquals("\u007f\u007f\u007fp ",sent.last())
+            view.flushComposingText(restartIme=false)
+            assertEquals(5,sent.size)
+            assertEquals("",input.getTextBeforeCursor(20,0).toString())
         }
     }
     @Test fun keyboardAdvertisesImagesAndAcceptsThemWithoutSendingTextOrEnter() {

@@ -1,0 +1,25 @@
+{
+  "build": 124,
+  "jvm_tests": 177,
+  "jvm_skipped": 1,
+  "lint_release": "passed",
+  "phone_editor_input_tests_passed": 11,
+  "phone_keyboard_viewport_tests_passed": 3,
+  "phone_model": "SM-S906E",
+  "screenshots_reviewed": [
+    "server-editor-compact-light.png",
+    "server-editor-compact-dark.png"
+  ],
+  "coverage": [
+    "midword composing-region replacement",
+    "finish/delete/commit correction batches",
+    "prefix commit retaining a new composing suffix",
+    "Unicode backspace and cursor movement",
+    "stale input connection rejection",
+    "dictation and image input",
+    "SSH key paste and encrypted import",
+    "saved-key action alignment in both themes",
+    "stable keyboard viewport"
+  ],
+  "limitation": "Gboard candidate taps were not automated; standard Android InputConnection editing sequences were exercised on the phone."
+}

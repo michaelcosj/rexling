@@ -447,6 +447,7 @@ internal class RexConnection(application: Application, private val scope: Corout
     }
     fun keyboardShown() {keyboardRequest=""}
     fun click(col: Int,row: Int,cw: Int,ch: Int) {
+        flushImeComposition()
         val current=state.value
         if(visible && foreground && current.connected && current.controlled && !current.creating && !navigationRequest.pending && current.screen?.mouseTracking==true)
             command("click","session" to current.selectedSession,"block" to current.selectedBlock,"navigationId" to current.navigationId,

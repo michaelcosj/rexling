@@ -111,7 +111,7 @@ class TerminalView(context: Context) : View(context) {
         set(value) {
             if (field != value) {
                 field = value
-                if (!value) composing = ""
+                if (!value) {composing="";imeEditable?.clear();imeEditable=null}
                 selectionMode?.invalidate()
                 (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).restartInput(this)
             }
@@ -140,6 +140,10 @@ class TerminalView(context: Context) : View(context) {
     private var desiredTextSize=1f
     private var dimensions = 0 to 0
     private var composing = ""
+    private var imeEditable: android.text.Editable?=null
+    private var composingCursor=0
+    private var flushImeEditor: (() -> Unit)?=null
+    private var deliveringImeInput=false
     private var insetHorizontal = 0f
     private var insetTop = 0f
     private var insetBottom = 0f
@@ -264,6 +268,10 @@ class TerminalView(context: Context) : View(context) {
                 canvas.drawRect(x,y,x+composingWidth,y+cellHeight,backgroundPaint)
                 canvas.drawText(composing, x, y + baseline, paint)
                 canvas.drawLine(x, y + baseline + 2, x + composingWidth, y + baseline + 2, paint)
+                if(composingCursor<composing.length) {
+                    val caret=x+paint.measureText(composing,0,composingCursor.coerceIn(0,composing.length))
+                    canvas.drawLine(caret,y+2,caret,y+cellHeight-2,paint)
+                }
             }
         }
         canvas.restore()
@@ -585,22 +593,100 @@ class TerminalView(context: Context) : View(context) {
         }
     }
     internal fun flushComposingText(restartIme: Boolean=true) {
-        val pending=composing
-        composing=""
-        if(pending.isNotEmpty()) {
-            onInput(pending);invalidate()
-            if(restartIme) (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).restartInput(this)
+        if(deliveringImeInput) return
+        val hadContext=imeEditable?.isNotEmpty()==true || composing.isNotEmpty()
+        flushImeEditor?.invoke()
+        composing="";composingCursor=0
+        if(restartIme && hadContext) {
+            imeEditable=null;flushImeEditor=null
+            (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).restartInput(this)
         }
     }
     override fun performClick(): Boolean { super.performClick();if(interactive) {if(controlled) keyboard() else onActivate()};return true }
     override fun onCheckIsTextEditor() = controlled
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         if (!controlled) return null
-        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or (if(keyboardSuggestions) 0 else InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or (if(keyboardSuggestions) InputType.TYPE_TEXT_FLAG_AUTO_CORRECT else InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NONE
         outAttrs.contentMimeTypes=imageMimeTypes.copyOf()
         val imageTarget=imageInputTarget()
-        return object : BaseInputConnection(this, false) {
+        val pending=composing
+        val editor=android.text.SpannableStringBuilder(pending)
+        android.text.Selection.setSelection(editor,editor.length)
+        imeEditable=editor
+        outAttrs.initialSelStart=editor.length;outAttrs.initialSelEnd=editor.length
+        if(android.os.Build.VERSION.SDK_INT>=30) outAttrs.setInitialSurroundingText(editor)
+        val connection=object : BaseInputConnection(this, true) {
+            private var batchDepth=0
+            private var pendingCommit=false
+            private var sentText=""
+            private var sentCursor=0
+            private fun active()=controlled && interactive && imageTarget==imageInputTarget() && imeEditable===editor
+            override fun getEditable(): android.text.Editable = editor
+            private fun sync() {
+                val text=editor.toString()
+                composing=if(text.startsWith(sentText) && sentCursor==sentText.length) text.substring(sentText.length) else ""
+                composingCursor=(android.text.Selection.getSelectionEnd(editor)-sentText.length).coerceIn(0,composing.length)
+                invalidate()
+                if(batchDepth==0) (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).updateSelection(this@TerminalView,
+                    android.text.Selection.getSelectionStart(editor),android.text.Selection.getSelectionEnd(editor),
+                    getComposingSpanStart(editor),getComposingSpanEnd(editor))
+            }
+            private fun submit(text: String,cursor: Int) {
+                if(text==sentText && cursor==sentCursor) return
+                var prefix=0
+                while(prefix<minOf(sentText.length,text.length) && sentText[prefix]==text[prefix]) prefix++
+                if(prefix>0 && prefix<sentText.length && Character.isLowSurrogate(sentText[prefix])) prefix--
+                val keys=buildString {
+                    repeat(sentText.codePointCount(sentCursor,sentText.length)) {append("\u001b[C")}
+                    repeat(sentText.codePointCount(prefix,sentText.length)) {append('\u007f')}
+                    append(text.substring(prefix))
+                    repeat(text.codePointCount(cursor,text.length)) {append("\u001b[D")}
+                }
+                sentText=text;sentCursor=cursor
+                if(keys.isNotEmpty()) {
+                    deliveringImeInput=true
+                    try {onInput(keys)} finally {deliveringImeInput=false}
+                }
+            }
+            fun flush() {
+                if(!active()) return
+                submit(editor.toString(),android.text.Selection.getSelectionEnd(editor).coerceIn(0,editor.length))
+                BaseInputConnection.removeComposingSpans(editor)
+                editor.clear();android.text.Selection.setSelection(editor,0);sentText="";sentCursor=0
+                sync()
+            }
+            private fun commitPending() {
+                if(!pendingCommit || batchDepth>0) {sync();return}
+                pendingCommit=false
+                val start=getComposingSpanStart(editor)
+                val end=if(start<0) editor.length else start
+                submit(editor.substring(0,end),if(start<0) android.text.Selection.getSelectionEnd(editor).coerceIn(0,end) else end)
+                if(!keyboardSuggestions || editor.length>8192 || editor.any {it<' '}) {
+                    editor.clear();android.text.Selection.setSelection(editor,0);sentText="";sentCursor=0
+                }
+                sync()
+            }
+            private fun edited() {
+                if(getComposingSpanStart(editor)<0) {pendingCommit=true;commitPending()} else sync()
+            }
+            override fun beginBatchEdit(): Boolean {if(!active()) return false;batchDepth++;return true}
+            override fun endBatchEdit(): Boolean {if(!active()) return false;if(batchDepth>0) batchDepth--;commitPending();return batchDepth>0}
+            override fun getExtractedText(request: android.view.inputmethod.ExtractedTextRequest?,flags: Int): android.view.inputmethod.ExtractedText? {
+                if(!active()) return null
+                return android.view.inputmethod.ExtractedText().apply {
+                    text=editor.toString();startOffset=0;partialStartOffset=-1;partialEndOffset=-1
+                    selectionStart=android.text.Selection.getSelectionStart(editor);selectionEnd=android.text.Selection.getSelectionEnd(editor)
+                }
+            }
+            override fun setSelection(start: Int,end: Int): Boolean {
+                if(!active() || start !in 0..editor.length || end !in 0..editor.length) return false
+                return super.setSelection(start,end).also {sync()}
+            }
+            override fun setComposingRegion(start: Int,end: Int): Boolean {
+                if(!active()) return false
+                return super.setComposingRegion(start,end).also {sync()}
+            }
             override fun commitContent(info: android.view.inputmethod.InputContentInfo,flags: Int,opts: android.os.Bundle?): Boolean {
                 if(!controlled || !interactive || imageTarget!=imageInputTarget() || imageMimeTypes.none {info.description.hasMimeType(it)}) return false
                 val granted=flags and InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION!=0
@@ -610,21 +696,57 @@ class TerminalView(context: Context) : View(context) {
                 return try {onImage(info.contentUri,release).also {if(!it) release()}} catch(_: Exception) {release();false}
             }
             override fun performContextMenuAction(id: Int): Boolean = if(id==android.R.id.paste || id==android.R.id.pasteAsPlainText) controlled && interactive && imageTarget==imageInputTarget() && onPaste() else super.performContextMenuAction(id)
-            override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean { composing = ""; if (text != null) onInput(text.toString()); invalidate(); return true }
-            override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean { composing = text?.toString().orEmpty(); invalidate(); return true }
-            override fun finishComposingText(): Boolean {flushComposingText(restartIme=false);return true}
+            override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                if(!active()) return false
+                if(text!=null) {super.commitText(text,newCursorPosition);pendingCommit=true;commitPending()}
+                return true
+            }
+            override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                if(!active()) return false
+                super.setComposingText(text ?: "",newCursorPosition);sync();return true
+            }
+            override fun finishComposingText(): Boolean {
+                if(!active()) return false
+                super.finishComposingText();pendingCommit=true;commitPending();return true
+            }
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                if (composing.isNotEmpty()) { composing = composing.dropLast(beforeLength.coerceAtMost(composing.length)); invalidate(); return true }
-                repeat(beforeLength.coerceAtMost(128)) { onInput("\u007f") }
-                repeat(afterLength.coerceAtMost(128)) { onInput("\u001b[3~") }; return true
+                if(!active()) return false
+                if(editor.isNotEmpty()) {super.deleteSurroundingText(beforeLength.coerceAtLeast(0),afterLength.coerceAtLeast(0));edited();return true}
+                repeat(beforeLength.coerceIn(0,128)) {onInput("\u007f")}
+                repeat(afterLength.coerceIn(0,128)) {onInput("\u001b[3~")};return true
+            }
+            override fun deleteSurroundingTextInCodePoints(beforeLength: Int,afterLength: Int): Boolean {
+                if(!active()) return false
+                if(editor.isNotEmpty()) return super.deleteSurroundingTextInCodePoints(beforeLength.coerceAtLeast(0),afterLength.coerceAtLeast(0)).also {edited()}
+                return deleteSurroundingText(beforeLength,afterLength)
             }
             override fun sendKeyEvent(event: KeyEvent): Boolean {
-                if (event.action != KeyEvent.ACTION_DOWN) return true
-                if (event.keyCode == KeyEvent.KEYCODE_ENTER) finishComposingText()
-                return onKeyDown(event.keyCode, event)
+                if(!active()) return false
+                if(event.action!=KeyEvent.ACTION_DOWN) return true
+                if(editor.isNotEmpty() && event.keyCode in listOf(KeyEvent.KEYCODE_DEL,KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT)) {
+                    val start=android.text.Selection.getSelectionStart(editor);val end=android.text.Selection.getSelectionEnd(editor)
+                    if(event.keyCode==KeyEvent.KEYCODE_DEL) {
+                        if(start!=end) editor.delete(minOf(start,end),maxOf(start,end))
+                        else if(start>0) editor.delete(Character.offsetByCodePoints(editor,start,-1),start)
+                    } else {
+                        val cursor=if(event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT) minOf(start,end) else maxOf(start,end)
+                        val next=if(event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT && cursor>0) Character.offsetByCodePoints(editor,cursor,-1)
+                            else if(event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT && cursor<editor.length) Character.offsetByCodePoints(editor,cursor,1) else cursor
+                        android.text.Selection.setSelection(editor,next)
+                    }
+                    edited();return true
+                }
+                if(editor.isNotEmpty()) flushComposingText(restartIme=false)
+                return onKeyDown(event.keyCode,event)
             }
-            override fun performEditorAction(actionCode: Int): Boolean { finishComposingText(); onInput("\r"); return true }
+            override fun performEditorAction(actionCode: Int): Boolean {
+                if(!active()) return false
+                batchDepth=0;finishComposingText();flush();onInput("\r");return true
+            }
         }
+        flushImeEditor={connection.flush()}
+        if(pending.isNotEmpty()) connection.setComposingRegion(0,editor.length)
+        return connection
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if(event.isShiftPressed && keyCode in listOf(KeyEvent.KEYCODE_PAGE_UP,KeyEvent.KEYCODE_PAGE_DOWN)) {
