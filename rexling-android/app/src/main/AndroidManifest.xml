@@ -10,6 +10,7 @@
         android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="false"
         android:fullBackupContent="@xml/backup_rules" android:dataExtractionRules="@xml/data_extraction_rules"
         android:supportsRtl="true" android:usesCleartextTraffic="true">
+        <service android:name=".PortForwardService" android:exported="false" android:stopWithTask="true" android:foregroundServiceType="connectedDevice" />
         <service android:name=".BackgroundMonitorService" android:exported="false" android:stopWithTask="true" android:foregroundServiceType="connectedDevice" />
         <activity android:name=".MainActivity" android:exported="true"
             android:windowSoftInputMode="adjustResize">

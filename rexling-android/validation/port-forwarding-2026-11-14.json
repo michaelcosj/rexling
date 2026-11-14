@@ -1,0 +1,80 @@
+{
+  "feature": "API 14 local TCP forwarding",
+  "native": "88 existing workspace tests passed before final error handling; focused real-server test passed after final error handling",
+  "integration": "8 concurrent 130000-byte echo streams and half-close; dropped proxy sockets reconnect with identical local address and block ID; new traffic succeeds; block removed after stop",
+  "android": "2 instrumentation tests passed including real HTTP via native JNI foreground service and form validation",
+  "jvm": "168 passed, 1 skipped",
+  "build": "release/debug/JNI, lintRelease passed",
+  "apk": {
+    "apk": "dist/Rexling-2026.11.13-build110-59d2ee4b07-modified-arm64-release.apk",
+    "application_label": "Rexling",
+    "version_name": "2026.11.13",
+    "version_code": 110,
+    "sha256": "fde1aa1a77bfee21886a1aa9ef7805cc54c2b63e31afc8b8d5475700655e1d96",
+    "bytes": 17803003,
+    "signature_verified": true,
+    "debuggable": false,
+    "art_profiles": [
+      {
+        "name": "assets/dexopt/baseline.prof",
+        "bytes": 7217
+      },
+      {
+        "name": "assets/dexopt/baseline.profm",
+        "bytes": 800
+      }
+    ],
+    "zip_alignment_16k": true,
+    "permissions": [
+      "android.permission.INTERNET",
+      "android.permission.ACCESS_LOCAL_NETWORK",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
+      "android.permission.CHANGE_NETWORK_STATE",
+      "dev.shulhi.rex.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    ],
+    "native_libraries": [
+      {
+        "name": "lib/arm64-v8a/libandroidx.graphics.path.so",
+        "bytes": 10096,
+        "load_alignment": 16384
+      },
+      {
+        "name": "lib/arm64-v8a/libc++_shared.so",
+        "bytes": 1423696,
+        "load_alignment": 16384
+      },
+      {
+        "name": "lib/arm64-v8a/librex_android.so",
+        "bytes": 5678192,
+        "load_alignment": 16384
+      }
+    ],
+    "runtime_execution": "not performed by this static APK check"
+  },
+  "installation": {
+    "device": "100.97.157.23:44317",
+    "model": "SM-S906E",
+    "version_code": 110,
+    "sha256": "fde1aa1a77bfee21886a1aa9ef7805cc54c2b63e31afc8b8d5475700655e1d96",
+    "installation": "success",
+    "settings_preserved": true,
+    "app_launched": false
+  },
+  "scope": "local (-L) forwarding only; reverse forwarding and managing other clients forwards deferred",
+  "form_followup": {
+    "build": 111,
+    "changes": "Default form asks only for remote port; host and manual phone port remain under Advanced; bind error includes selected phone port and OS cause",
+    "validation": "occupied-port native regression passed; simplified form instrumentation passed; release/debug/lint/static APK checks passed",
+    "installation": {
+      "device": "100.97.157.23:44317",
+      "version_code": 111,
+      "sha256": "40aa54721afafd5bcbbe404247ba9a8f30807c0e9937eefac7a321559a82f917",
+      "installation": "success",
+      "settings_preserved": true,
+      "app_launched": false
+    }
+  }
+}

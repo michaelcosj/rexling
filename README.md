@@ -55,6 +55,9 @@ Studio to work on the app.
 - **Image uploads** — paste or attach images to supported Rex servers, with
   upload progress and cancellation. Rex inserts the uploaded file’s path into
   the destination terminal. Requires Rex API revision 11 or newer.
+- **Port forwarding** — open remote TCP services in your phone’s browser, with
+  automatic reconnection and background forwarding. Requires Rex API revision 14
+  or newer.
 - **Activity and notifications** — track working tasks, finished tasks and
   requests for attention, with optional background alerts.
 - **Appearance** — light, dark and system themes, program icons and frosted

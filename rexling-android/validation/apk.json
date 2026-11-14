@@ -1,20 +1,20 @@
 {
-  "apk": "dist/Rexling-2026.11.11-build109-0559dcc969-modified-arm64-release.apk",
+  "apk": "dist/Rexling-2026.11.13-build111-59d2ee4b07-modified-arm64-release.apk",
   "application_label": "Rexling",
-  "version_name": "2026.11.11",
-  "version_code": 109,
-  "sha256": "f74368af352c98b5afce4a5d4e60ea1008637dda8df62486581bfe68f2e520e1",
-  "bytes": 17602951,
+  "version_name": "2026.11.13",
+  "version_code": 111,
+  "sha256": "40aa54721afafd5bcbbe404247ba9a8f30807c0e9937eefac7a321559a82f917",
+  "bytes": 17804035,
   "signature_verified": true,
   "debuggable": false,
   "art_profiles": [
     {
       "name": "assets/dexopt/baseline.prof",
-      "bytes": 5985
+      "bytes": 5919
     },
     {
       "name": "assets/dexopt/baseline.profm",
-      "bytes": 802
+      "bytes": 806
     }
   ],
   "zip_alignment_16k": true,
@@ -41,16 +41,15 @@
     },
     {
       "name": "lib/arm64-v8a/librex_android.so",
-      "bytes": 5494560,
+      "bytes": 5679224,
       "load_alignment": 16384
     }
   ],
   "runtime_execution": "not performed by this static APK check",
   "installation": {
-    "device": "100.97.157.23:38789",
-    "model": "SM-S906E",
-    "version_code": 109,
-    "sha256": "f74368af352c98b5afce4a5d4e60ea1008637dda8df62486581bfe68f2e520e1",
+    "device": "100.97.157.23:44317",
+    "version_code": 111,
+    "sha256": "40aa54721afafd5bcbbe404247ba9a8f30807c0e9937eefac7a321559a82f917",
     "installation": "success",
     "settings_preserved": true,
     "app_launched": false
