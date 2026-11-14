@@ -1,0 +1,41 @@
+{
+  "build": 112,
+  "date": "2026-11-14",
+  "jvm": {
+    "tests": 170,
+    "failures": 0,
+    "skipped": 1
+  },
+  "native_workspace": {
+    "passed": 89,
+    "ignored": 18
+  },
+  "go": "go test -race ./... passed; unknown/changed host keys rejected, key and keyless auth, Unix socket discovery and stream transport tested against isolated SSH servers",
+  "android": {
+    "integration_tests": 4,
+    "ui_tests": 2,
+    "results": "passed on Medium_Phone_API_37.0",
+    "covers": [
+      "tsnet startup without VPN permission against non-listening local control URL",
+      "real Android JNI/WebSocket Rex control connection over SSH",
+      "Keystore encryption of imported private keys",
+      "invalid control URL and key rejection",
+      "network settings and SSH server editor UI"
+    ]
+  },
+  "apk": "dist/Rexling-2026.11.14-build112-59d2ee4b07-modified-arm64-release.apk",
+  "sha256": "4ad66393bdef0b4671838f74d9f78a0359b141596a77b48b48a080c558fada1a",
+  "limitations": [
+    "Live Tailscale or Headscale enrollment and tailnet routing require user sign-in and have not been exercised.",
+    "SSH supports Unix-socket Rex hosts (Linux/macOS), not Windows named pipes.",
+    "SSH password auth and agent forwarding are not implemented."
+  ],
+  "installation": {
+    "device": "100.97.157.23:44317",
+    "model": "SM-S906E",
+    "version_code": 112,
+    "sha256": "4ad66393bdef0b4671838f74d9f78a0359b141596a77b48b48a080c558fada1a",
+    "settings": "preserved by install -r",
+    "app_launched": false
+  }
+}

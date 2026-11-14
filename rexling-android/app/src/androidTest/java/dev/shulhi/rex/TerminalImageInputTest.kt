@@ -22,6 +22,28 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class TerminalImageInputTest {
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
+    @Test fun ordinaryTextInputAcceptsSuggestionsAndDictationWithoutDuplicateCommits() {
+        instrumentation.runOnMainSync {
+            val sent=mutableListOf<String>()
+            val view=TerminalView(instrumentation.targetContext).apply {controlled=true;onInput={sent+=it}}
+            val attrs=EditorInfo();val input=view.onCreateInputConnection(attrs)!!
+            assertEquals(android.text.InputType.TYPE_TEXT_VARIATION_NORMAL,attrs.inputType and android.text.InputType.TYPE_MASK_VARIATION)
+            assertEquals(0,attrs.inputType and android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+            input.setComposingText("helo",1)
+            input.setComposingText("hello",1)
+            assertTrue(sent.isEmpty())
+            input.commitText("hello ",1)
+            input.finishComposingText()
+            assertEquals(listOf("hello "),sent)
+            input.commitText("This is dictated text.",1)
+            input.finishComposingText()
+            assertEquals(listOf("hello ","This is dictated text."),sent)
+            input.setComposingText("pending",1)
+            view.flushComposingText()
+            input.finishComposingText()
+            assertEquals(listOf("hello ","This is dictated text.","pending"),sent)
+        }
+    }
     @Test fun keyboardAdvertisesImagesAndAcceptsThemWithoutSendingTextOrEnter() {
         instrumentation.runOnMainSync {
             var images=0;var text="";var releases=0;var pasted=0

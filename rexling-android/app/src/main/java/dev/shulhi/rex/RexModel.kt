@@ -10,6 +10,7 @@ import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -211,7 +212,7 @@ class RexModel @JvmOverloads constructor(application: Application, preferenceNam
     val activeServer: ServerProfile get()=servers.firstOrNull {it.id==activeServerId} ?: ServerProfile.Empty
     val connectedCount: Int get()=serverStatuses.values.count {it.connected}
 
-    init {preferences.registerOnSharedPreferenceChangeListener(alertsListener);desired.toList().forEach {id->connectServer(id,select=false)}}
+    init {viewModelScope.launch {NetworkSettings.revision.drop(1).collect {connections.filterKeys {it in desired}.values.forEach {it.retryNow()}}};preferences.registerOnSharedPreferenceChangeListener(alertsListener);desired.toList().forEach {id->connectServer(id,select=false)}}
 
     private fun connection(profile: ServerProfile): RexConnection = connections.getOrPut(profile.id) {
         RexConnection(getApplication(),viewModelScope,profile.endpoint,preferences).also {client->
@@ -338,6 +339,7 @@ class RexModel @JvmOverloads constructor(application: Application, preferenceNam
         connections[id]?.let {it.releaseControl();it.disconnect()}
     }
     fun forgetServer(id: String) {
+        servers.firstOrNull {it.id==id}?.let {profile->NetworkSettings.forget(profile.endpoint,servers.filter {it.id!=id}.map {it.endpoint})}
         images.forget(id)
         if(activeServerId==id) serverSwitchSerial++
         disconnectServer(id)

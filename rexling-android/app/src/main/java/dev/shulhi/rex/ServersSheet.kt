@@ -78,12 +78,16 @@ import androidx.compose.ui.unit.sp
     var icon by remember(server?.id) {mutableStateOf(server?.icon ?: ServerIcon.GLOBE)}
     var error by remember {mutableStateOf<String?>(null)}
     AlertDialog(onDismissRequest=onClose,title={Text(if(server==null) "Add server" else "Edit server")},text={
-        Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)) {
             ServerIconPicker(icon) {icon=it}
             OutlinedTextField(name,{name=it;error=null},Modifier.fillMaxWidth(),label={Text("Name")},singleLine=true)
             OutlinedTextField(endpoint,{endpoint=it;error=null},Modifier.fillMaxWidth(),label={Text("Server URL")},singleLine=true,
                 keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Uri),placeholder={Text("https://host.tailnet.ts.net",fontSize=11.sp)})
-            Text("Use the server's authenticated Tailscale address.",fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("HTTPS for an existing Rex server, or ssh://user@host for SSH.",fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            if(endpoint.startsWith("ssh://")) {
+                val normalized=runCatching {ServerProfile.normalizeEndpoint(endpoint)}.getOrNull()
+                if(normalized!=null) SshKeyEditor(normalized)
+            }
             error?.let {Text(it,color=MaterialTheme.colorScheme.error,fontSize=12.sp)}
         }
     },confirmButton={Button(onClick={error=onSave(name,endpoint,icon);if(error==null) onClose()},enabled=endpoint.isNotBlank()) {Text("Save & connect")}},

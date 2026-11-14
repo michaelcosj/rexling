@@ -1,0 +1,20 @@
+{
+  "build": 113,
+  "tests": "TerminalImageInputTest: 3 passed on API 37 emulator",
+  "changes": [
+    "normal multiline text input instead of visible-password input",
+    "keyboard suggestions enabled except in Neovim",
+    "flush pending composition before terminal shortcuts and paste",
+    "avoid duplicate composing-text commits"
+  ],
+  "apk": "dist/Rexling-2026.11.14-build113-59d2ee4b07-modified-arm64-release.apk",
+  "sha256": "ac8cf83e82dcb8b97eb06271d55086822ac106bf5b2bca2948d22c2e179c83a9",
+  "voice_input": "Gboard microphone eligibility restored by removing password input variation; actual microphone capture not tested",
+  "installation": {
+    "device": "100.97.157.23:35603",
+    "version_code": 113,
+    "sha256": "ac8cf83e82dcb8b97eb06271d55086822ac106bf5b2bca2948d22c2e179c83a9",
+    "settings_preserved": true,
+    "app_launched": false
+  }
+}

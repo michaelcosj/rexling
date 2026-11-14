@@ -13,18 +13,19 @@ for everyday shell work, Neovim, Codex and Claude.
 ## Installation and build
 
 Rexling supports **Android 9 or newer on 64-bit ARM devices**. You need a running
-Rex server and Tailscale connected to the same tailnet on your phone.
+Rex server. Connect through your phone’s Tailscale VPN, optional built-in Tailscale,
+or SSH.
 
 ### Install an APK
 
 Download an APK from [GitHub Releases](https://github.com/shulhi/rexling/releases),
 open it on your phone, and allow installation when Android asks. Open Rexling
-and enter your Rex server’s private HTTPS URL. On Android 17+, allow local
+and enter your Rex server’s private HTTPS URL or `ssh://user@host`. On Android 17+, allow local
 network access when prompted.
 
 ### Build from source
 
-Install Android Studio, the Android SDK/NDK, Rust, Python and curl. Exact versions
+Install Android Studio, the Android SDK/NDK, Rust, Go, Python and curl. Exact versions
 and setup instructions are in [BUILDING.md](BUILDING.md).
 
 ```sh
@@ -38,6 +39,9 @@ SHA-256 checksum in `rexling-android/dist/`. Open `rexling-android/` in Android
 Studio to work on the app.
 
 ## Features
+
+- **Connection options** — SSH with encrypted key storage or keyless Tailscale SSH,
+  optional built-in Tailscale and custom Headscale control servers. See [connection setup](docs/connections.md).
 
 - **Servers and sessions** — connect to multiple Rex servers, create and rename
   sessions, and restore your last session, tab and pane.

@@ -1,20 +1,20 @@
 {
-  "apk": "dist/Rexling-2026.11.13-build111-59d2ee4b07-modified-arm64-release.apk",
+  "apk": "dist/Rexling-2026.11.14-build113-59d2ee4b07-modified-arm64-release.apk",
   "application_label": "Rexling",
-  "version_name": "2026.11.13",
-  "version_code": 111,
-  "sha256": "40aa54721afafd5bcbbe404247ba9a8f30807c0e9937eefac7a321559a82f917",
-  "bytes": 17804035,
+  "version_name": "2026.11.14",
+  "version_code": 113,
+  "sha256": "ac8cf83e82dcb8b97eb06271d55086822ac106bf5b2bca2948d22c2e179c83a9",
+  "bytes": 37470058,
   "signature_verified": true,
   "debuggable": false,
   "art_profiles": [
     {
       "name": "assets/dexopt/baseline.prof",
-      "bytes": 5919
+      "bytes": 7254
     },
     {
       "name": "assets/dexopt/baseline.profm",
-      "bytes": 806
+      "bytes": 811
     }
   ],
   "zip_alignment_16k": true,
@@ -41,17 +41,14 @@
     },
     {
       "name": "lib/arm64-v8a/librex_android.so",
-      "bytes": 5679224,
+      "bytes": 5742176,
+      "load_alignment": 16384
+    },
+    {
+      "name": "lib/arm64-v8a/librex_network.so",
+      "bytes": 19550544,
       "load_alignment": 16384
     }
   ],
-  "runtime_execution": "not performed by this static APK check",
-  "installation": {
-    "device": "100.97.157.23:44317",
-    "version_code": 111,
-    "sha256": "40aa54721afafd5bcbbe404247ba9a8f30807c0e9937eefac7a321559a82f917",
-    "installation": "success",
-    "settings_preserved": true,
-    "app_launched": false
-  }
+  "runtime_execution": "not performed by this static APK check"
 }

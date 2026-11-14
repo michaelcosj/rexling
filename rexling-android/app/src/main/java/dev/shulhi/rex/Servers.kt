@@ -25,12 +25,12 @@ data class ServerProfile(val id: String,val label: String,val endpoint: String,v
         fun normalizeEndpoint(value: String): String {
             val uri=runCatching {URI(value.trim())}.getOrElse {throw IllegalArgumentException("Enter a complete server URL")}
             val scheme=uri.scheme?.lowercase(Locale.ROOT)
-            require(scheme in listOf("https","http","wss","ws") && !uri.host.isNullOrBlank()) {"Enter an http(s) or ws(s) server URL"}
-            require(uri.rawUserInfo==null && uri.rawQuery==null && uri.rawFragment==null) {"Use the server URL without credentials, query or fragment"}
-            require(uri.path.isNullOrEmpty() || uri.path=="/") {"Use the server's root URL"}
+            require(scheme in listOf("https","http","wss","ws","ssh") && !uri.host.isNullOrBlank()) {"Enter an HTTP(S), WS(S), or ssh://user@host URL"}
+            require((if(scheme=="ssh") !uri.rawUserInfo.isNullOrEmpty() && !uri.rawUserInfo.contains(":") else uri.rawUserInfo==null) && uri.rawQuery==null && uri.rawFragment==null) {"Use the server URL without credentials, query or fragment"}
+            require(scheme=="ssh" || uri.path.isNullOrEmpty() || uri.path=="/") {"Use the server's root URL"}
             val port=if((scheme in listOf("https","wss") && uri.port==443) || (scheme in listOf("http","ws") && uri.port==80)) -1 else uri.port
             require(port in -1..65535 && port!=0) {"Enter a valid server port"}
-            return URI(scheme,null,uri.host.lowercase(Locale.ROOT),port,null,null,null).toASCIIString()
+            return URI(scheme,if(scheme=="ssh") uri.userInfo else null,uri.host.lowercase(Locale.ROOT),port,if(scheme=="ssh") uri.path.takeUnless {it=="/"} else null,null,null).toASCIIString()
         }
     }
 }

@@ -10,3 +10,6 @@ pub mod upload;
 pub mod graphics;
 
 pub mod forward;
+
+#[cfg(target_os = "android")]
+pub mod network;

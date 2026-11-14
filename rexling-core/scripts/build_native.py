@@ -82,6 +82,14 @@ def main():
         env["AR_aarch64_linux_android"] = str(compiler_root / "bin/llvm-ar")
         env["CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"] = str(compiler)
         env["CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS"] = "-C link-arg=-Wl,-z,max-page-size=16384"
+    if not args.host_test:
+        network = ROOT.parent / "rexling-network"
+        network_prefix = ROOT / ".build/network-arm64"
+        network_prefix.mkdir(parents=True, exist_ok=True)
+        network_env = env.copy()
+        network_env.update({"GOOS":"android", "GOARCH":"arm64", "CGO_ENABLED":"1", "CC":str(compiler), "CGO_LDFLAGS":"-Wl,-z,max-page-size=16384"})
+        run(["go", "build", "-mod=readonly", "-trimpath", "-buildmode=c-shared", "-ldflags=-s -w", "-o", network_prefix / "librex_network.so", "."], cwd=network, env=network_env)
+        env["REXLING_NETWORK_PREFIX"] = str(network_prefix)
     run(command, cwd=source_root, env=env)
     env["GHOSTTY_PREFIX"] = str(prefix)
     if args.host_test:
@@ -92,6 +100,7 @@ def main():
     destination = ANDROID / "app/src/main/jniLibs/arm64-v8a"
     destination.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(ROOT / f".build/rust/{TARGET}/release/librex_android.so", destination / "librex_android.so")
+    shutil.copyfile(network_prefix / "librex_network.so", destination / "librex_network.so")
     shutil.copyfile(compiler_root / "sysroot/usr/lib/aarch64-linux-android/libc++_shared.so", destination / "libc++_shared.so")
     print(f"Android arm64 JNI libraries built in {destination}")
 

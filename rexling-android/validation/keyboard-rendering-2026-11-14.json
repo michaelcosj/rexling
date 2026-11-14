@@ -1,0 +1,31 @@
+{
+  "date": "2026-11-14",
+  "build": 114,
+  "device": "Samsung Galaxy S22+ SM-S906E, Android 16/API 36, Gboard",
+  "isolation": "dev.shulhi.rex.renderbench; no user settings or sessions changed",
+  "changes": [
+    "Keep Android terminal measurement and PTY grid stable through IME animation",
+    "Pan only enough to keep the cursor plus footer above the keyboard; top prompts stay put",
+    "Read cursor movement during placement instead of composition",
+    "Observe keyboard visibility as a derived boolean rather than recomposing the workspace for every IME animation pixel"
+  ],
+  "comparison": {
+    "workload": "one synthetic open/close animation on the same device; same renderer and content, legacy measurement vs stable viewport",
+    "legacy_resize_callbacks": 18,
+    "fixed_resize_callbacks": 0,
+    "legacy_row_recordings": 1143,
+    "fixed_row_recordings": 0
+  },
+  "validation": {
+    "real_gboard_open_close": "passed; no dimension changes; top prompt stays put; bottom cursor physically moves above controls",
+    "rendering_and_input_tests_passed": 35,
+    "unrelated_test_failure": "Existing launcherPortraitReachesTheBottomOfTheMaskWithoutAWhiteGap failed: No bottom mask pixels checked. Launcher artwork and that assertion were not changed.",
+    "pane_swipe_and_frame_presentation_tests": 13,
+    "unit_tests": "passed",
+    "release_lint": "passed"
+  },
+  "limitations": [
+    "This measures resize callbacks and retained-row recordings, not end-to-end frame latency or battery life.",
+    "Keyboard remains an occluder; the terminal grid does not reflow to its shorter visible area."
+  ]
+}

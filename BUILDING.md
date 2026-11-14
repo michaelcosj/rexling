@@ -8,6 +8,7 @@ arm64-v8a Android 9/API 28 or newer; other Android ABIs are not built yet.
 ## Prerequisites
 
 - Rust 1.93+ and rustup, with Cargo available on PATH or under `~/.cargo/bin`.
+- Go with automatic toolchain downloads enabled (the embedded network module pins Go 1.27.1).
 - Python 3.9+ and curl for the native build helper.
 - Android Studio, or an Android SDK plus JDK 25.
 - SDK platform `platforms;android-37`, Build Tools `build-tools;36.0.0`, NDK
@@ -42,7 +43,8 @@ Android project. To select another JDK on macOS, run `./gradlew` directly from
 Open `rexling-android/` in Android Studio. Gradle runs the native build helper
 automatically. libghostty-vt is pinned to release 1.0.1. Ghostty revision, source checksums, Zig downloads and NDK version
 are pinned in `rexling-core/native/ghostty-source.json`. Rust dependencies share
-`rexling-core/Cargo.lock`. The AGP, Kotlin/Compose, Gradle and AndroidX versions
+`rexling-core/Cargo.lock`. SSH and built-in Tailscale dependencies are pinned in
+`rexling-network/go.mod` and `go.sum`; the helper builds their Android shared library with the NDK. The AGP, Kotlin/Compose, Gradle and AndroidX versions
 remain pinned by the Android project.
 
 Release output: `rexling-android/app/build/outputs/apk/release/app-release.apk`.

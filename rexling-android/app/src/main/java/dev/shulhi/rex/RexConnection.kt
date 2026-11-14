@@ -463,8 +463,15 @@ internal class RexConnection(application: Application, private val scope: Corout
         if(letter !in controlShortcuts || !visible || !state.value.controlled || state.value.creating || navigationRequest.pending) return
         resetModifiers();type(TerminalInput.modified(letter,control=true,alt=false))
     }
+    private fun flushImeComposition() {
+        val view=boundView?.get() ?: return
+        val control=controlModifier;val alt=altModifier;val shift=shiftState
+        resetModifiers()
+        try {view.flushComposingText()} finally {controlModifier=control;altModifier=alt;shiftState=shift}
+    }
     fun type(text: String) {
         if (!visible || !state.value.controlled || state.value.creating || navigationRequest.pending || text.isEmpty()) return
+        flushImeComposition()
         val input = TerminalInput.modified(text, controlModifier, altModifier, shiftModifier)
         controlModifier = false; altModifier = false;shiftState=shiftState.consume();keyboardRequest=""
         command("input", "text" to input,"session" to state.value.selectedSession,"block" to state.value.selectedBlock,"navigationId" to state.value.navigationId,"connectionEpoch" to state.value.connectionEpoch)
@@ -472,7 +479,7 @@ internal class RexConnection(application: Application, private val scope: Corout
     fun scroll(lines: Int) {if(!navigationRequest.pending && state.value.screen!=null) command("scroll","block" to state.value.selectedBlock,"lines" to lines)}
     fun scrollToBottom() {if(!navigationRequest.pending && state.value.screen!=null) command("scroll","block" to state.value.selectedBlock,"bottom" to true)}
     fun key(name: String) = type(TerminalInput.key(name))
-    fun paste(text: String) { if (visible && state.value.controlled && !navigationRequest.pending) command("paste", "text" to text,"session" to state.value.selectedSession,"block" to state.value.selectedBlock,"navigationId" to state.value.navigationId,"connectionEpoch" to state.value.connectionEpoch) }
+    fun paste(text: String) { if (visible && state.value.controlled && !navigationRequest.pending) {flushImeComposition();command("paste", "text" to text,"session" to state.value.selectedSession,"block" to state.value.selectedBlock,"navigationId" to state.value.navigationId,"connectionEpoch" to state.value.connectionEpoch)} }
     fun resize(columns: Int, rows: Int) {
         val size = columns.coerceIn(1, 512) to rows.coerceIn(1, 256)
         lastSize = size

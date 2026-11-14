@@ -11,7 +11,7 @@ import java.io.IOException;
 
 /** Test APK providers run separately, without the target APK's Kotlin runtime. */
 public final class TestImageProvider extends ContentProvider {
-    public static final Uri uri=Uri.parse("content://dev.shulhi.rex.test.images/image.png");
+    public static final Uri uri=Uri.parse("content://"+BuildConfig.APPLICATION_ID+".test.images/image.png");
     public static final byte[] png=Base64.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP2sAAAAASUVORK5CYII=",Base64.DEFAULT);
     @Override public boolean onCreate() {return true;}
     @Override public String getType(Uri value) {return "image/png";}

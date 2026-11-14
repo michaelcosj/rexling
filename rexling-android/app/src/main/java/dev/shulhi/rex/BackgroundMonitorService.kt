@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.collectLatest
 import org.json.JSONObject
 
@@ -33,6 +34,7 @@ class BackgroundMonitorService: Service() {
     }}}
     override fun onCreate() {
         super.onCreate()
+        scope.launch {NetworkSettings.revision.drop(1).collectLatest {monitors.values.forEach {monitor->if(monitor.handle!=0L) NativeBridge.command(monitor.handle,"{\"type\":\"retry\"}")}}}
         notifications.createNotificationChannel(NotificationChannel(BackgroundAlerts.MONITOR_CHANNEL,"Background monitoring",NotificationManager.IMPORTANCE_LOW).apply {
             description="Keeps your connected servers available for attention alerts";setShowBadge(false);setSound(null,null)
         })

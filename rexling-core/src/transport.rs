@@ -38,11 +38,11 @@ impl Endpoint {
     pub fn new(server: &str, timeout: Duration) -> Result<Self> {
         let url = Url::parse(server).context("use an explicit unix://, https://, http://, wss://, or ws:// URL (host labels are CLI-only)")?;
         ensure!(
-            matches!(url.scheme(), "unix" | "https" | "http" | "wss" | "ws"),
+            matches!(url.scheme(), "unix" | "https" | "http" | "wss" | "ws" | "ssh"),
             "unsupported server scheme"
         );
         ensure!(
-            url.username().is_empty() && url.password().is_none(),
+            (url.username().is_empty() || url.scheme() == "ssh") && url.password().is_none(),
             "login-server account selection is not implemented; URL credentials are not accepted"
         );
         ensure!(
@@ -54,6 +54,8 @@ impl Endpoint {
                 url.host_str().is_none() && !url.path().is_empty(),
                 "use unix:///absolute/socket/path"
             );
+        } else if url.scheme() == "ssh" {
+            ensure!(url.host_str().is_some() && !url.username().is_empty(), "SSH requires a host and username");
         } else {
             ensure!(
                 url.host_str().is_some() && matches!(url.path(), "" | "/"),
@@ -66,12 +68,13 @@ impl Endpoint {
 
     pub async fn open(&self, path: &str, protocol: &str) -> Result<Ws> {
         let unix = self.url.scheme() == "unix";
-        let mut url = if unix {
+        let ssh = self.url.scheme() == "ssh";
+        let mut url = if unix || ssh {
             Url::parse("ws://localhost")?
         } else {
             self.url.clone()
         };
-        if !unix {
+        if !unix && !ssh {
             let scheme = match url.scheme() {
                 "https" => "wss",
                 "http" => "ws",
@@ -109,6 +112,14 @@ impl Endpoint {
                     bail!("Unix sockets are unsupported on this platform");
                 }
             } else {
+                #[cfg(target_os = "android")]
+                if ssh || crate::network::enabled() {
+                    let stream = crate::network::connect(self.url.to_string(), self.timeout).await?;
+                    let (ws, response) = tokio_tungstenite::client_async_tls_with_config(request, stream, Some(config), None).await?;
+                    ensure!(response.headers().get("Sec-WebSocket-Protocol").and_then(|h|h.to_str().ok()) == Some(protocol), "server did not negotiate {protocol}");
+                    return Ok(Box::new(ws) as Ws);
+                }
+                ensure!(!ssh, "SSH transport is available in the Android app");
                 let (ws, response) = connect_async_with_config(request, Some(config), true)
                     .await
                     .context(

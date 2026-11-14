@@ -37,6 +37,9 @@ fn main() {
     .expect("copy Ghostty static archive");
     println!("cargo:rustc-link-lib=static=rex_ghostty_vt");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
+        let network = std::env::var("REXLING_NETWORK_PREFIX").expect("network library must be built for Android");
+        println!("cargo:rustc-link-search=native={network}");
+        println!("cargo:rustc-link-lib=dylib=rex_network");
         println!("cargo:rustc-link-lib=c++_shared");
     }
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {

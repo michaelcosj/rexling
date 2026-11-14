@@ -42,6 +42,8 @@ import dev.chrisbanes.haze.hazeSource
     val hasMinimap=blocks.all {b->switchLayout.any {it.id==b.id}}
     val localHaze=remember {HazeState()}
     val haze=hazeState ?: localHaze
+    val imeInsets=WindowInsets.ime
+    val navigationInsets=WindowInsets.navigationBars
     val palette=LocalTerminalPalette.current
     val backdrop=MaterialTheme.colorScheme.background
     val scope=rememberCoroutineScope()
@@ -109,6 +111,7 @@ import dev.chrisbanes.haze.hazeSource
             val frame=if(block.id==liveBlock && liveScreen!=null) liveScreen else frames[block.id]
             val pageOffset=offset*stride
             key(block.id) {
+                var cursorBottom by remember {mutableStateOf<Float?>(null)}
                 Box(Modifier.width(cardWidth).fillMaxHeight().graphicsLayer {
                     val position=pageOffset+drag
                     translationX=kotlin.math.round(leftPx+position)
@@ -117,13 +120,16 @@ import dev.chrisbanes.haze.hazeSource
                     .then(if(center) Modifier else Modifier.clickable(role=Role.Button){latestSelect(block.id)})) {
                     Box(Modifier.fillMaxSize()) {
                         if(frame!=null) AndroidView(
-                            factory={TerminalView(it)},modifier=Modifier.fillMaxSize().clipToBounds(),
+                            factory={TerminalView(it)},modifier=Modifier.fillMaxSize().terminalImeViewport(imeInsets,navigationInsets) {cursorBottom}.clipToBounds(),
                             update={view ->
+                                view.onCursorViewportBottom={cursorBottom=it}
+                                cursorBottom=view.cursorViewportBottom
                                 view.onDimensions=if(center && block.id==liveBlock) onDimensions else {_,_->}
                                 view.setTerminalPaddingDp(12,8,if(bottomControlsInset>0.dp || blocks.size>1) 28 else 6)
                                 view.palette=palette;view.textSp=fontSize
                                 if(block.id!=liveBlock || bindLiveView?.invoke(block.id,view)!=true) view.screen=frame
                                 view.interactive=center
+                                view.keyboardSuggestions=programs[block.id]?.kind!=ProgramKind.NEOVIM
                                 view.controlled=center && controlled && block.id==liveBlock
                                 view.imageInputTarget=imageTarget
                                 view.onImage=if(center && block.id==liveBlock) onImage else {_,release->release();false}

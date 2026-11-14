@@ -179,3 +179,16 @@ pub extern "system" fn Java_dev_shulhi_rex_NativeBridge_forwardPoll(mut env: JNI
 pub extern "system" fn Java_dev_shulhi_rex_NativeBridge_forwardDestroy(_env: JNIEnv, _class: JClass, id: jlong) {
     let _=std::panic::catch_unwind(||forwards::destroy(id as u64));
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_shulhi_rex_NativeBridge_networkCommand(mut env: JNIEnv, _class: JClass, request: JString) -> jstring {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> anyhow::Result<String> {
+        let request: String = env.get_string(&request)?.into();
+        #[cfg(target_os = "android")]
+        return rex_core::network::command(&request);
+        #[cfg(not(target_os = "android"))]
+        { let _ = request; anyhow::bail!("Android networking bridge is unavailable on this platform") }
+    }));
+    let response = match result {Ok(Ok(v))=>v,Ok(Err(e))=>serde_json::json!({"error":e.to_string()}).to_string(),Err(_)=>"{\"error\":\"Network command failed\"}".into()};
+    string(&mut env,response)
+}

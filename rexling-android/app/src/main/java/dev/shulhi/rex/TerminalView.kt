@@ -82,14 +82,22 @@ class TerminalView(context: Context) : View(context) {
     var screen: TerminalScreen?
         get()=currentScreen
         set(value) {setScreen(value,false)}
+    internal var onCursorViewportBottom: (Float?)->Unit={}
+    internal val cursorViewportBottom: Float? get()=screen?.cursorY?.takeIf {it>=0 && it<(screen?.rows ?: 0)}?.let {insetTop+(it+1)*cellHeight+insetBottom}
+    private fun reportCursorViewport() {onCursorViewportBottom(cursorViewportBottom)}
     private var frameTraceToken: String?=null
     internal fun presentFrame(value: TerminalScreen?,token: String?=null) {setScreen(value,true);frameTraceToken=token}
     private fun setScreen(value: TerminalScreen?,onDisplayFrame: Boolean) {
         if(currentScreen===value) return
         val columns=currentScreen?.columns;currentScreen=value;frameTraceToken=null
         if(columns!=value?.columns) configureRendering()
+        reportCursorViewport()
         if(onDisplayFrame) invalidate() else postInvalidateOnAnimation()
     }
+    var keyboardSuggestions: Boolean = true
+        set(value) {
+            if(field!=value) {field=value;(context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).restartInput(this)}
+        }
     var controlled: Boolean = false
         set(value) {
             if (field != value) {
@@ -135,7 +143,7 @@ class TerminalView(context: Context) : View(context) {
         val b = (bottom * density).roundToInt().toFloat()
         if (h == insetHorizontal && t == insetTop && b == insetBottom) return
         insetHorizontal = h; insetTop = t; insetBottom = b
-        configureRendering();clearRows();reportDimensions(); invalidate()
+        configureRendering();clearRows();reportDimensions();reportCursorViewport(); invalidate()
     }
     private val paneGesture = PaneGesture(ViewConfiguration.get(context).scaledTouchSlop.toFloat(), 48f * resources.displayMetrics.density)
 
@@ -148,7 +156,7 @@ class TerminalView(context: Context) : View(context) {
         clearRows();advances.clear()
         val grid = fonts.configure(paint, textSp)
         desiredCellWidth=grid.cellWidth;desiredCellHeight=grid.cellHeight;desiredTextSize=paint.textSize
-        configureRendering();reportDimensions()
+        configureRendering();reportDimensions();reportCursorViewport()
     }
     private fun configureRendering() {
         // Keep the user's font fixed. Reflow comes from the canonical PTY resize.
@@ -165,7 +173,7 @@ class TerminalView(context: Context) : View(context) {
         val next = max(1, floor(contentWidth / desiredCellWidth).toInt()) to max(1, floor(contentHeight / desiredCellHeight).toInt())
         if (width > 0 && height > 0 && (force || next != dimensions)) { dimensions = next; onDimensions(next.first, next.second) }
     }
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {clearSelection();configureRendering();reportDimensions()}
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {clearSelection();configureRendering();reportDimensions();reportCursorViewport()}
     override fun onDraw(canvas: Canvas) {
         val frame = selection?.frame ?: screen ?: return
         val saved = canvas.save()
@@ -548,11 +556,19 @@ class TerminalView(context: Context) : View(context) {
             canvas.drawCircle(x,y,5*resources.displayMetrics.density,backgroundPaint)
         }
     }
+    internal fun flushComposingText(restartIme: Boolean=true) {
+        val pending=composing
+        composing=""
+        if(pending.isNotEmpty()) {
+            onInput(pending);invalidate()
+            if(restartIme) (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).restartInput(this)
+        }
+    }
     override fun performClick(): Boolean { super.performClick();if(interactive) {if(controlled) keyboard() else onActivate()};return true }
     override fun onCheckIsTextEditor() = controlled
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         if (!controlled) return null
-        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or (if(keyboardSuggestions) 0 else InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NONE
         outAttrs.contentMimeTypes=imageMimeTypes.copyOf()
         val imageTarget=imageInputTarget()
@@ -568,7 +584,7 @@ class TerminalView(context: Context) : View(context) {
             override fun performContextMenuAction(id: Int): Boolean = if(id==android.R.id.paste || id==android.R.id.pasteAsPlainText) controlled && interactive && imageTarget==imageInputTarget() && onPaste() else super.performContextMenuAction(id)
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean { composing = ""; if (text != null) onInput(text.toString()); invalidate(); return true }
             override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean { composing = text?.toString().orEmpty(); invalidate(); return true }
-            override fun finishComposingText(): Boolean { if (composing.isNotEmpty()) onInput(composing); composing = ""; invalidate(); return true }
+            override fun finishComposingText(): Boolean {flushComposingText(restartIme=false);return true}
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
                 if (composing.isNotEmpty()) { composing = composing.dropLast(beforeLength.coerceAtMost(composing.length)); invalidate(); return true }
                 repeat(beforeLength.coerceAtMost(128)) { onInput("\u007f") }

@@ -866,8 +866,9 @@ impl Actor {
                     server.starts_with("https://")
                         || server.starts_with("http://")
                         || server.starts_with("wss://")
-                        || server.starts_with("ws://"),
-                    "Enter a complete http(s) or ws(s) server URL"
+                        || server.starts_with("ws://")
+                        || server.starts_with("ssh://"),
+                    "Enter a complete HTTP(S), WS(S), or SSH server URL"
                 );
                 let endpoint = Endpoint::new(&server, Duration::from_secs(10))?;
                 self.disconnect().await;
